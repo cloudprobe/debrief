@@ -33,8 +33,11 @@ brews:
   - repository:
       owner: cloudprobe
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/cloudprobe/devrecap
     description: Know what you actually did today, including your AI sessions
     license: MIT
     install: |
       bin.install "devrecap"
+    test: |
+      assert_match "devrecap", shell_output("#{bin}/devrecap --version")
