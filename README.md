@@ -42,6 +42,9 @@ devrecap reads the session logs these tools already write to disk and produces a
 ## Install
 
 ```bash
+# Homebrew
+brew install cloudprobe/tap/devrecap
+
 # From source
 go install github.com/cloudprobe/devrecap/cmd/devrecap@latest
 
@@ -127,7 +130,7 @@ devrecap today --format json | jq '.by_project | keys'
 
 ## Requirements
 
-- Go 1.22+
+- Go 1.26+
 - Claude Code installed (creates session files at `~/.claude/projects/`)
 
 ## License
