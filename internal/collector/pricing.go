@@ -27,7 +27,7 @@ var PricingTable = map[string]ModelPricing{
 
 // CalculateCost computes the USD cost for a given token usage and model.
 // Cache read tokens are charged at 10% of the input rate.
-// Cache write tokens are charged at the normal input rate.
+// Cache write tokens are charged at 125% of the input rate.
 func CalculateCost(modelName string, tokensIn, tokensOut, cacheRead, cacheWrite int) float64 {
 	pricing, ok := PricingTable[modelName]
 	if !ok {
@@ -37,7 +37,7 @@ func CalculateCost(modelName string, tokensIn, tokensOut, cacheRead, cacheWrite 
 	inputCost := float64(tokensIn) * pricing.InputPerMillion / 1_000_000
 	outputCost := float64(tokensOut) * pricing.OutputPerMillion / 1_000_000
 	cacheReadCost := float64(cacheRead) * pricing.InputPerMillion * 0.10 / 1_000_000
-	cacheWriteCost := float64(cacheWrite) * pricing.InputPerMillion / 1_000_000
+	cacheWriteCost := float64(cacheWrite) * pricing.InputPerMillion * 1.25 / 1_000_000
 
 	return inputCost + outputCost + cacheReadCost + cacheWriteCost
 }

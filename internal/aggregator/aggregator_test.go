@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudprobe/devrecap/internal/model"
+	"github.com/cloudprobe/debrief/internal/model"
 )
 
 func TestAggregate_Empty(t *testing.T) {

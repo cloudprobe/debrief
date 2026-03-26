@@ -1,6 +1,6 @@
 package collector
 
-import "github.com/cloudprobe/devrecap/internal/model"
+import "github.com/cloudprobe/debrief/internal/model"
 
 // Collector is the interface that all data sources implement.
 type Collector interface {

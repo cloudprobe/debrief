@@ -1,8 +1,8 @@
 version: 2
 
 builds:
-  - main: ./cmd/devrecap
-    binary: devrecap
+  - main: ./cmd/debrief
+    binary: debrief
     env:
       - CGO_ENABLED=0
     goos:
@@ -38,10 +38,10 @@ brews:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: https://github.com/cloudprobe/devrecap
-    description: Know what you actually did today, including your AI sessions
+    homepage: https://github.com/cloudprobe/debrief
+    description: Know what you actually did today — git commits, AI sessions, one command
     license: MIT
     install: |
-      bin.install "devrecap"
+      bin.install "debrief"
     test: |
-      assert_match "devrecap", shell_output("#{bin}/devrecap --version")
+      assert_match "debrief", shell_output("#{bin}/debrief --version")

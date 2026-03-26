@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudprobe/devrecap/internal/model"
+	"github.com/cloudprobe/debrief/internal/model"
 )
 
 func TestClaudeCollector_ParseSampleFile(t *testing.T) {
@@ -170,7 +170,10 @@ func TestCalculateCost(t *testing.T) {
 			tokensOut:  500,
 			cacheRead:  200,
 			cacheWrite: 100,
-			wantCost:   0.003 + 0.0075 + 0.00006 + 0.0003,
+			// input: 1000 * 3/1M = 0.003, output: 500 * 15/1M = 0.0075
+			// cache read: 200 * 3 * 0.10 / 1M = 0.00006
+			// cache write: 100 * 3 * 1.25 / 1M = 0.000375
+			wantCost: 0.003 + 0.0075 + 0.00006 + 0.000375,
 		},
 		{
 			name:      "unknown model",

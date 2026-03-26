@@ -1,4 +1,4 @@
-module github.com/cloudprobe/devrecap
+module github.com/cloudprobe/debrief
 
 go 1.26.1
 

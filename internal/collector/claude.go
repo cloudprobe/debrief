@@ -6,22 +6,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/cloudprobe/devrecap/internal/model"
+	"github.com/cloudprobe/debrief/internal/model"
 )
 
 const claudeBaseDir = ".claude/projects"
 
 // claudeRecord is the raw JSONL record from Claude Code session files.
 type claudeRecord struct {
-	Type      string          `json:"type"`
-	SessionID string          `json:"sessionId"`
-	Timestamp time.Time       `json:"timestamp"`
-	CWD       string          `json:"cwd"`
-	GitBranch string          `json:"gitBranch"`
-	Message   json.RawMessage `json:"message"`
+	Type        string          `json:"type"`
+	SessionID   string          `json:"sessionId"`
+	Timestamp   time.Time       `json:"timestamp"`
+	CWD         string          `json:"cwd"`
+	GitBranch   string          `json:"gitBranch"`
+	Message     json.RawMessage `json:"message"`
+	CustomTitle string          `json:"customTitle"` // type=custom-title
+	LastPrompt  string          `json:"lastPrompt"`  // type=last-prompt
 }
 
 // claudeAssistantMsg represents the assistant message envelope.
@@ -118,6 +121,7 @@ type projectAccum struct {
 	project       string
 	cwd           string
 	branch        string
+	sessionID     string
 	firstSeen     time.Time
 	lastSeen      time.Time
 	interactions  int
@@ -129,13 +133,15 @@ type projectAccum struct {
 	tools         map[string]int  // tool name → call count
 	filesCreated  map[string]bool // unique file paths
 	filesModified map[string]bool // unique file paths
+	msgTimestamps []time.Time     // for duration estimation
 }
 
-func newProjectAccum(project, cwd, branch string, ts time.Time) *projectAccum {
+func newProjectAccum(project, cwd, branch, sessionID string, ts time.Time) *projectAccum {
 	return &projectAccum{
 		project:       project,
 		cwd:           cwd,
 		branch:        branch,
+		sessionID:     sessionID,
 		firstSeen:     ts,
 		lastSeen:      ts,
 		models:        make(map[string]int),
@@ -152,6 +158,27 @@ func (pa *projectAccum) touch(ts time.Time) {
 	if ts.After(pa.lastSeen) {
 		pa.lastSeen = ts
 	}
+	pa.msgTimestamps = append(pa.msgTimestamps, ts)
+}
+
+// estimateDuration sums gaps between messages, capping each gap at 5 min.
+func (pa *projectAccum) estimateDuration() time.Duration {
+	if len(pa.msgTimestamps) < 2 {
+		return 0
+	}
+	sort.Slice(pa.msgTimestamps, func(i, j int) bool {
+		return pa.msgTimestamps[i].Before(pa.msgTimestamps[j])
+	})
+	var total time.Duration
+	maxGap := 5 * time.Minute
+	for i := 1; i < len(pa.msgTimestamps); i++ {
+		gap := pa.msgTimestamps[i].Sub(pa.msgTimestamps[i-1])
+		if gap > maxGap {
+			gap = maxGap
+		}
+		total += gap
+	}
+	return total
 }
 
 // addFile records a file path, making it relative to the project CWD
@@ -186,6 +213,12 @@ func makeRelative(absPath, cwd string) string {
 	return filepath.Base(absPath)
 }
 
+// deferredMsg holds a raw assistant message with its record metadata for dedup.
+type deferredMsg struct {
+	rec claudeRecord
+	raw json.RawMessage
+}
+
 // parseSessionFile reads a single JSONL file and extracts activities split by project (CWD).
 func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]model.Activity, error) {
 	f, err := os.Open(path)
@@ -197,6 +230,13 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 	// Key: "sessionID:project" → accumulator
 	accums := make(map[string]*projectAccum)
 
+	// Dedup assistant messages by message.id — keep last (most complete) chunk.
+	assistantMsgs := make(map[string]deferredMsg) // message.id → last record
+
+	// Session metadata: custom titles and last prompts.
+	sessionTitles := make(map[string]string)     // sessionID → custom title
+	sessionLastPrompt := make(map[string]string) // sessionID → last prompt
+
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
@@ -207,6 +247,17 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 		}
 
 		if rec.Timestamp.Before(dr.Start) || rec.Timestamp.After(dr.End) {
+			// Still parse metadata records outside the range for session context.
+			switch rec.Type {
+			case "custom-title":
+				if rec.CustomTitle != "" && rec.SessionID != "" {
+					sessionTitles[rec.SessionID] = rec.CustomTitle
+				}
+			case "last-prompt":
+				if rec.LastPrompt != "" && rec.SessionID != "" {
+					sessionLastPrompt[rec.SessionID] = rec.LastPrompt
+				}
+			}
 			continue
 		}
 
@@ -215,7 +266,7 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 		key := rec.SessionID + ":" + project
 		pa, ok := accums[key]
 		if !ok {
-			pa = newProjectAccum(project, rec.CWD, rec.GitBranch, rec.Timestamp)
+			pa = newProjectAccum(project, rec.CWD, rec.GitBranch, rec.SessionID, rec.Timestamp)
 			accums[key] = pa
 		}
 		pa.touch(rec.Timestamp)
@@ -227,34 +278,63 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			}
 
 		case "assistant":
-			var msg claudeAssistantMsg
-			if err := json.Unmarshal(rec.Message, &msg); err != nil {
+			// Extract message ID for dedup.
+			var peek struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(rec.Message, &peek); err == nil && peek.ID != "" {
+				assistantMsgs[peek.ID] = deferredMsg{rec: rec, raw: rec.Message}
+			}
+
+		case "custom-title":
+			if rec.CustomTitle != "" && rec.SessionID != "" {
+				sessionTitles[rec.SessionID] = rec.CustomTitle
+			}
+
+		case "last-prompt":
+			if rec.LastPrompt != "" && rec.SessionID != "" {
+				sessionLastPrompt[rec.SessionID] = rec.LastPrompt
+			}
+		}
+	}
+
+	// Process deduplicated assistant messages.
+	for _, dm := range assistantMsgs {
+		rec := dm.rec
+		project := projectFromCWD(rec.CWD)
+		key := rec.SessionID + ":" + project
+		pa, ok := accums[key]
+		if !ok {
+			continue
+		}
+
+		var msg claudeAssistantMsg
+		if err := json.Unmarshal(dm.raw, &msg); err != nil {
+			continue
+		}
+
+		if msg.Usage != nil && msg.Model != "" {
+			pa.models[msg.Model]++
+			pa.tokensIn += msg.Usage.InputTokens
+			pa.tokensOut += msg.Usage.OutputTokens
+			pa.cacheRead += msg.Usage.CacheReadInputTokens
+			pa.cacheWrite += msg.Usage.CacheCreationInputTokens
+		}
+
+		for _, block := range msg.Content {
+			if block.Type != "tool_use" || block.Name == "" {
 				continue
 			}
+			pa.tools[block.Name]++
 
-			if msg.Usage != nil && msg.Model != "" {
-				pa.models[msg.Model]++
-				pa.tokensIn += msg.Usage.InputTokens
-				pa.tokensOut += msg.Usage.OutputTokens
-				pa.cacheRead += msg.Usage.CacheReadInputTokens
-				pa.cacheWrite += msg.Usage.CacheCreationInputTokens
-			}
-
-			for _, block := range msg.Content {
-				if block.Type != "tool_use" || block.Name == "" {
-					continue
+			switch block.Name {
+			case "Write":
+				if fp := extractFilePath(block.Input); fp != "" {
+					pa.addFile(fp, true)
 				}
-				pa.tools[block.Name]++
-
-				switch block.Name {
-				case "Write":
-					if fp := extractFilePath(block.Input); fp != "" {
-						pa.addFile(fp, true)
-					}
-				case "Edit":
-					if fp := extractFilePath(block.Input); fp != "" {
-						pa.addFile(fp, false)
-					}
+			case "Edit":
+				if fp := extractFilePath(block.Input); fp != "" {
+					pa.addFile(fp, false)
 				}
 			}
 		}
@@ -272,12 +352,22 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			cost = CalculateCost(primaryModel, pa.tokensIn, pa.tokensOut, pa.cacheRead, pa.cacheWrite)
 		}
 
+		// Resolve session title: custom-title > last-prompt > empty.
+		title := sessionTitles[pa.sessionID]
+		if title == "" {
+			title = sessionLastPrompt[pa.sessionID]
+		}
+		if len(title) > 60 {
+			title = title[:57] + "..."
+		}
+
 		activities = append(activities, model.Activity{
 			Source:        "claude-code",
 			SessionID:     pa.project,
+			SessionTitle:  title,
 			Timestamp:     pa.firstSeen,
 			EndTime:       pa.lastSeen,
-			Duration:      pa.lastSeen.Sub(pa.firstSeen),
+			Duration:      pa.estimateDuration(),
 			Project:       pa.project,
 			Branch:        pa.branch,
 			Model:         primaryModel,

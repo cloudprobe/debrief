@@ -5,14 +5,26 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
-	"github.com/cloudprobe/devrecap/internal/model"
+	"github.com/cloudprobe/debrief/internal/model"
 )
 
 // RenderOptions controls what's shown in the output.
 type RenderOptions struct {
 	ShowCost  bool
 	SingleDay bool // true when showing a single day (adds "Your day —" prefix)
+	Detail    bool // show per-session detail
+}
+
+// CostSummary holds aggregated cost data for the footer.
+type CostSummary struct {
+	PeriodLabel  string // "Today", "This week", "This month", or custom
+	PeriodCost   float64
+	WeekCost     float64
+	MonthCost    float64
+	WeekByModel  map[string]model.ModelSummary
+	MonthByModel map[string]model.ModelSummary
 }
 
 // RenderText produces a plain text summary — what you actually did.
@@ -34,6 +46,8 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 	projects := sortedProjects(summary.ByProject)
 	totalFiles := 0
 	totalCommits := 0
+	totalInsertions := 0
+	totalDeletions := 0
 
 	for _, p := range projects {
 		fmt.Fprintf(&b, "  %s\n", p.Name)
@@ -43,16 +57,43 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 			fmt.Fprintf(&b, "    %s\n", desc)
 		}
 
+		// Duration.
+		if p.Duration > 0 {
+			fmt.Fprintf(&b, "    ~%s active\n", formatDuration(p.Duration))
+		}
+
+		// Session detail (when --detail is set).
+		if opts.Detail && len(p.Sessions) > 0 {
+			for _, s := range p.Sessions {
+				if s.Source != "claude-code" {
+					continue
+				}
+				title := s.SessionTitle
+				if title == "" {
+					title = "(untitled)"
+				}
+				modelName := shortModelName(s.Model)
+				line := fmt.Sprintf("    \"%s\"  %s  %s  $%.2f",
+					title, modelName, plural(s.Interactions, "msg"), s.CostUSD)
+				fmt.Fprintf(&b, "%s\n", line)
+			}
+		}
+
 		// Files line.
 		if fileLine := formatFileSummary(p.FilesCreated, p.FilesModified); fileLine != "" {
 			fmt.Fprintf(&b, "    %s\n", fileLine)
 		}
 		totalFiles += len(p.FilesCreated) + len(p.FilesModified)
 
-		// Commit messages.
+		// Commit messages with diff stats.
 		if p.CommitCount > 0 {
 			fmt.Fprintf(&b, "    %s\n", formatCommitMessages(p.CommitMessages, p.CommitCount))
+			if p.Insertions > 0 || p.Deletions > 0 {
+				fmt.Fprintf(&b, "    +%d -%d lines\n", p.Insertions, p.Deletions)
+			}
 			totalCommits += p.CommitCount
+			totalInsertions += p.Insertions
+			totalDeletions += p.Deletions
 		}
 
 		b.WriteString("\n")
@@ -66,7 +107,14 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 		parts = append(parts, plural(totalFiles, "file")+" changed")
 	}
 	if totalCommits > 0 {
-		parts = append(parts, plural(totalCommits, "commit"))
+		commitPart := plural(totalCommits, "commit")
+		if totalInsertions > 0 || totalDeletions > 0 {
+			commitPart += fmt.Sprintf(" · +%d -%d lines", totalInsertions, totalDeletions)
+		}
+		parts = append(parts, commitPart)
+	}
+	if summary.DeepSessions > 0 {
+		parts = append(parts, plural(summary.DeepSessions, "deep session"))
 	}
 	fmt.Fprintf(&b, "  %s\n\n", strings.Join(parts, " · "))
 
@@ -159,11 +207,87 @@ func RenderCost(summary model.DaySummary, opts RenderOptions) string {
 	return b.String()
 }
 
-// RenderCostFooter renders the today/week/month cost summary line.
-func RenderCostFooter(todayCost, weekCost, monthCost float64) string {
+// RenderCostFooter renders the today/week/month cost summary with per-model breakdown.
+func RenderCostFooter(cs CostSummary) string {
 	var b strings.Builder
 	b.WriteString("  " + strings.Repeat("─", 54) + "\n")
-	fmt.Fprintf(&b, "  Today: $%.2f · This week: $%.2f · This month: $%.2f\n\n", todayCost, weekCost, monthCost)
+	label := cs.PeriodLabel
+	if label == "" {
+		label = "Today"
+	}
+	fmt.Fprintf(&b, "  %s: $%.2f · This week: $%.2f · This month: $%.2f\n", label, cs.PeriodCost, cs.WeekCost, cs.MonthCost)
+
+	// Week per-model breakdown.
+	if len(cs.WeekByModel) > 0 {
+		b.WriteString("\n  Week by model:\n")
+		renderModelBreakdown(&b, cs.WeekByModel)
+	}
+
+	// Month per-model breakdown.
+	if len(cs.MonthByModel) > 0 {
+		b.WriteString("\n  Month by model:\n")
+		renderModelBreakdown(&b, cs.MonthByModel)
+	}
+
+	b.WriteString("\n")
+	return b.String()
+}
+
+func renderModelBreakdown(b *strings.Builder, byModel map[string]model.ModelSummary) {
+	type mc struct {
+		name string
+		cost float64
+	}
+	var models []mc
+	for _, m := range byModel {
+		if m.TotalCost > 0 {
+			models = append(models, mc{name: shortModelName(m.Name), cost: m.TotalCost})
+		}
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].cost > models[j].cost })
+	for _, m := range models {
+		fmt.Fprintf(b, "    %-26s $%.2f\n", m.name, m.cost)
+	}
+}
+
+// RenderMarkdown produces markdown output for PRs, wikis, or docs.
+func RenderMarkdown(summary model.DaySummary, opts RenderOptions) string {
+	if len(summary.Activities) == 0 {
+		return "No activity found for this period.\n"
+	}
+
+	var b strings.Builder
+
+	date := summary.Date.Format("January 2, 2006")
+	fmt.Fprintf(&b, "## %s\n\n", date)
+
+	projects := sortedProjects(summary.ByProject)
+
+	for _, p := range projects {
+		fmt.Fprintf(&b, "### %s\n", p.Name)
+
+		if desc := describeActivity(p); desc != "" {
+			fmt.Fprintf(&b, "- %s\n", desc)
+		}
+
+		if p.Duration > 0 {
+			fmt.Fprintf(&b, "- ~%s active\n", formatDuration(p.Duration))
+		}
+
+		if fileLine := formatFileSummary(p.FilesCreated, p.FilesModified); fileLine != "" {
+			fmt.Fprintf(&b, "- %s\n", fileLine)
+		}
+
+		if p.CommitCount > 0 {
+			fmt.Fprintf(&b, "- %s\n", formatCommitMessages(p.CommitMessages, p.CommitCount))
+			if p.Insertions > 0 || p.Deletions > 0 {
+				fmt.Fprintf(&b, "- +%d -%d lines\n", p.Insertions, p.Deletions)
+			}
+		}
+
+		b.WriteString("\n")
+	}
+
 	return b.String()
 }
 
@@ -414,6 +538,19 @@ func formatTokens(n int) string {
 		return fmt.Sprintf("%.1fK", float64(n)/1_000)
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+// formatDuration formats a duration as "1h 23m" or "45m".
+func formatDuration(d time.Duration) string {
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	return "< 1m"
 }
 
 func sortedProjects(m map[string]model.ProjectSummary) []model.ProjectSummary {

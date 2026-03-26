@@ -1,100 +1,118 @@
-# devrecap
+# debrief
 
-Know what you actually did today — including the hours you spent in AI coding tools.
-
-```
-$ devrecap
-
-  devrecap — Wednesday, Mar 25 2026
-  ──────────────────────────────────────────────────────
-
-  devrecap
-    71 interactions · 178.8K tokens · opus 4.6
-    21 files created, 5 files modified — aggregator.go, claude.go, text.go, main.go +18 more
-
-  claude
-    45 interactions · 203.8K tokens · opus 4.6
-    1 file created, 4 files modified — devrecap.rb, claude.go, text.go, Makefile
-
-  dotfiles
-    3 interactions · 659 tokens · opus 4.6
-    2 commits
-
-  ──────────────────────────────────────────────────────
-  120 interactions · 384.5K tokens
-```
-
-```
-$ devrecap standup
-
-**Mar 25:**
-• Built out **devrecap** — created 21 new files (aggregator.go, claude.go, text.go, main.go +17 more)
-• Researched and planned in **claude** (45 AI interactions)
-• Minor work on dotfiles, cloudprobe
-```
+Know what you actually did today — git commits, AI sessions, one command.
 
 ## Install
 
-```bash
-brew install cloudprobe/tap/devrecap
+```sh
+brew install cloudprobe/tap/debrief
 ```
 
-Or with Go:
+Or build from source:
 
-```bash
-go install github.com/cloudprobe/devrecap/cmd/devrecap@latest
-```
-
-### Upgrade
-
-```bash
-brew upgrade devrecap
+```sh
+go install github.com/cloudprobe/debrief/cmd/debrief@latest
 ```
 
 ## Usage
 
-```bash
-devrecap                          # Today's activity (default)
-devrecap yesterday                # Yesterday
-devrecap week                     # This week
-devrecap standup                  # Copy-paste standup (yesterday)
-devrecap today --format json      # JSON output for scripting
-devrecap today --cost             # Include estimated API costs
-devrecap today --date 2026-03-20  # Specific date
+```sh
+debrief                    # today's activity
+debrief yesterday          # yesterday
+debrief week               # this week (per-day breakdown)
+debrief month              # this month
+debrief -d 2026-03-25      # specific date
+debrief -f 2026-03-20 -t 2026-03-25  # date range
+
+debrief standup            # copy-paste standup bullets
+debrief standup week       # standup for the whole week
+
+debrief -c                 # cost view (today)
+debrief -c week            # weekly cost with per-model breakdown
+debrief -c month           # monthly cost with per-model breakdown
+
+debrief --detail           # show per-session detail
+debrief --no-git           # skip git, only show AI sessions
+debrief -o json            # JSON output
+debrief -o markdown        # markdown for PRs/wikis
+debrief -v                 # verbose/debug output
 ```
 
-## Data sources
+## What it does
 
-| Source | What it tracks |
-|--------|---------------|
-| **Claude Code** | Sessions, tokens, models, files created/modified, interactions |
-| **Git** | Commits by author across discovered repos |
+Reads your local Claude Code session files and git history. No API calls, no network access — everything is local.
 
-Planned: Codex CLI (OpenAI), Gemini CLI (Google).
+**Default view** — what you actually did:
+```
+  Your day — Wednesday, Mar 26 2026
+  ──────────────────────────────────────────────────────
+
+  cloudprobe/debrief
+    Built out new code with Claude
+    ~4h 37m active
+    Created 10 files, updated 14 files — main.go, text.go, aggregator.go +13 more
+    Committed: "rename to debrief", "add message dedup" +3 more
+    +340 -89 lines
+
+  cloudprobe/dotfiles
+    Made updates with Claude
+    ~20m active
+    updated 2 files — .zshrc, .gitconfig
+
+  ──────────────────────────────────────────────────────
+  2 repos · 26 files changed · 5 commits · +340 -89 lines · 2 deep sessions
+```
+
+**Standup** — plain text bullets for your team:
+```
+Mar 26 2026:
+• Built out cloudprobe/debrief — 10 new files (main.go, text.go, aggregator.go, model.go)
+• Minor work on cloudprobe/dotfiles
+```
+
+**Cost** — billing view with per-model breakdown:
+```
+  Cost — Wednesday, Mar 26 2026
+  ──────────────────────────────────────────────────────
+
+  cloudprobe/debrief                        $32.07
+    opus 4.6                   $31.88
+    haiku 4.5                  $0.19
+
+  ──────────────────────────────────────────────────────
+  Today: $32.07 · This week: $102.89 · This month: $102.90
+
+  Week by model:
+    opus 4.6                   $84.85
+    sonnet 4.6                 $16.89
+    haiku 4.5                  $1.14
+```
 
 ## Configuration
 
-Config file at `~/.config/devrecap/config.yaml` (optional — works without it):
+Optional config file at `~/.config/debrief/config.yaml`:
 
 ```yaml
-# Directories to scan for git repos (one level deep).
 git_repo_paths:
   - ~/work
   - ~/projects
   - ~/code
 
-# Override default Claude Code session path.
-claude_dir: ""
-
-# Default output format: text, json, or standup.
-default_format: text
+default_format: text  # text, json, standup, markdown
 ```
 
-## Privacy
+## Flags
 
-All data stays on your machine. devrecap makes **zero network calls**.
-
-It reads only metadata from session logs — token counts, model names, timestamps, file paths. It never reads prompt content, AI responses, or file contents.
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--date` | `-d` | Specific date (YYYY-MM-DD) |
+| `--from` | `-f` | Start date for range |
+| `--to` | `-t` | End date for range |
+| `--cost` | `-c` | Show billing view |
+| `--format` | `-o` | Output format: text, json, standup, markdown |
+| `--verbose` | `-v` | Debug output on stderr |
+| `--detail` | | Show per-session detail |
+| `--no-git` | | Skip git collection |
 
 ## License
 

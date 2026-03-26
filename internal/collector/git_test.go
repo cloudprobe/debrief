@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudprobe/devrecap/internal/model"
+	"github.com/cloudprobe/debrief/internal/model"
 )
 
 func TestGitCollector_CollectFromTempRepo(t *testing.T) {

@@ -2,8 +2,9 @@ package aggregator
 
 import (
 	"sort"
+	"time"
 
-	"github.com/cloudprobe/devrecap/internal/model"
+	"github.com/cloudprobe/debrief/internal/model"
 )
 
 // Aggregate takes a slice of activities and produces a DaySummary.
@@ -38,7 +39,11 @@ func Aggregate(activities []model.Activity) model.DaySummary {
 		p.Interactions += a.Interactions
 		p.CommitCount += a.CommitCount
 		p.CommitMessages = append(p.CommitMessages, a.CommitMessages...)
+		p.Insertions += a.Insertions
+		p.Deletions += a.Deletions
 		p.SessionCount++
+		p.Sessions = append(p.Sessions, a)
+		p.Duration += a.Duration
 		p.Sources = appendUnique(p.Sources, a.Source)
 		if a.Model != "" {
 			p.Models = appendUnique(p.Models, a.Model)
@@ -60,7 +65,47 @@ func Aggregate(activities []model.Activity) model.DaySummary {
 		}
 	}
 
+	// Calculate deep sessions (sustained work blocks >30 min on one project).
+	summary.DeepSessions = countDeepSessions(activities)
+
 	return summary
+}
+
+// countDeepSessions counts sustained work blocks where >30 min was spent
+// on a single project without switching to another project.
+func countDeepSessions(activities []model.Activity) int {
+	if len(activities) == 0 {
+		return 0
+	}
+
+	deep := 0
+	currentProject := activities[0].Project
+	blockStart := activities[0].Timestamp
+
+	for i := 1; i < len(activities); i++ {
+		a := activities[i]
+		if a.Project != currentProject {
+			// Project switch — check if the block we just finished was deep.
+			blockEnd := activities[i-1].EndTime
+			if !blockEnd.IsZero() && blockEnd.Sub(blockStart) >= 30*time.Minute {
+				deep++
+			}
+			currentProject = a.Project
+			blockStart = a.Timestamp
+		}
+	}
+
+	// Check the last block.
+	last := activities[len(activities)-1]
+	blockEnd := last.EndTime
+	if blockEnd.IsZero() {
+		blockEnd = last.Timestamp
+	}
+	if blockEnd.Sub(blockStart) >= 30*time.Minute {
+		deep++
+	}
+
+	return deep
 }
 
 func mergeToolBreakdown(dst, src map[string]int) map[string]int {

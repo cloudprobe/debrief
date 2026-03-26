@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config holds devrecap configuration.
+// Config holds debrief configuration.
 type Config struct {
 	// GitRepoPaths are directories to scan for git repos.
 	GitRepoPaths []string `yaml:"git_repo_paths"`
@@ -41,10 +41,10 @@ func DefaultConfig() Config {
 // configPath returns the path to the config file.
 func configPath() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "devrecap", "config.yaml")
+		return filepath.Join(xdg, "debrief", "config.yaml")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "devrecap", "config.yaml")
+	return filepath.Join(home, ".config", "debrief", "config.yaml")
 }
 
 // Load reads the config from disk, returning defaults if the file doesn't exist.

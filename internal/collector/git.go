@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudprobe/devrecap/internal/model"
+	"github.com/cloudprobe/debrief/internal/model"
 )
 
 // GitCollector discovers git repos and extracts commit activity.
@@ -122,6 +122,7 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 	var commits int
 	var messages []string
 	var earliest, latest time.Time
+	var totalInsertions, totalDeletions int
 
 	// Get current branch.
 	branch := getCurrentBranch(repoPath)
@@ -132,6 +133,7 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 			continue
 		}
 
+		hash := parts[0]
 		ts, err := strconv.ParseInt(parts[2], 10, 64)
 		if err != nil {
 			continue
@@ -147,6 +149,11 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 
 		commits++
 		messages = append(messages, parts[3])
+
+		// Get diff stats for this commit.
+		ins, del := commitDiffStats(repoPath, hash)
+		totalInsertions += ins
+		totalDeletions += del
 	}
 
 	if commits == 0 {
@@ -163,7 +170,43 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 		Branch:         branch,
 		CommitCount:    commits,
 		CommitMessages: messages,
+		Insertions:     totalInsertions,
+		Deletions:      totalDeletions,
 	}, nil
+}
+
+// commitDiffStats returns insertions and deletions for a single commit.
+func commitDiffStats(repoPath, hash string) (int, int) {
+	cmd := exec.Command("git", "-C", repoPath, "diff-tree", "--numstat", "--no-commit-id", hash)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = nil
+	if err := cmd.Run(); err != nil {
+		return 0, 0
+	}
+
+	var ins, del int
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		// Binary files show "-" instead of numbers.
+		if fields[0] != "-" {
+			if n, err := strconv.Atoi(fields[0]); err == nil {
+				ins += n
+			}
+		}
+		if fields[1] != "-" {
+			if n, err := strconv.Atoi(fields[1]); err == nil {
+				del += n
+			}
+		}
+	}
+	return ins, del
 }
 
 // repoSlug returns "org/repo" from the git remote URL, falling back to the directory name.

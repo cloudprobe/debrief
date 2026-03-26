@@ -6,11 +6,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/cloudprobe/devrecap/internal/aggregator"
-	"github.com/cloudprobe/devrecap/internal/collector"
-	"github.com/cloudprobe/devrecap/internal/config"
-	"github.com/cloudprobe/devrecap/internal/model"
-	"github.com/cloudprobe/devrecap/internal/ui"
+	"github.com/cloudprobe/debrief/internal/aggregator"
+	"github.com/cloudprobe/debrief/internal/collector"
+	"github.com/cloudprobe/debrief/internal/config"
+	"github.com/cloudprobe/debrief/internal/model"
+	"github.com/cloudprobe/debrief/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -21,12 +21,15 @@ var (
 	fromDate string
 	toDate   string
 	showCost bool
+	verbose  bool
+	detail   bool
+	noGit    bool
 )
 
 func main() {
 	root := &cobra.Command{
-		Use:     "devrecap",
-		Short:   "Know what you actually did today, including your AI sessions",
+		Use:     "debrief",
+		Short:   "Know what you actually did today — git commits, AI sessions, one command",
 		Version: version,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dr, err := resolveDateRange("", date, fromDate, toDate)
@@ -37,14 +40,18 @@ func main() {
 		},
 	}
 
-	root.PersistentFlags().StringVar(&format, "format", "", "output format: text, json, standup")
-	root.PersistentFlags().StringVar(&date, "date", "", "specific date (YYYY-MM-DD)")
-	root.PersistentFlags().StringVar(&fromDate, "from", "", "start date for range (YYYY-MM-DD)")
-	root.PersistentFlags().StringVar(&toDate, "to", "", "end date for range (YYYY-MM-DD)")
-	root.PersistentFlags().BoolVar(&showCost, "cost", false, "show billing view with estimated API costs")
+	root.PersistentFlags().StringVarP(&format, "format", "o", "", "output format: text, json, standup, markdown")
+	root.PersistentFlags().StringVarP(&date, "date", "d", "", "specific date (YYYY-MM-DD)")
+	root.PersistentFlags().StringVarP(&fromDate, "from", "f", "", "start date for range (YYYY-MM-DD)")
+	root.PersistentFlags().StringVarP(&toDate, "to", "t", "", "end date for range (YYYY-MM-DD)")
+	root.PersistentFlags().BoolVarP(&showCost, "cost", "c", false, "show billing view with estimated API costs")
+	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "show debug output on stderr")
+	root.PersistentFlags().BoolVar(&detail, "detail", false, "show per-session detail within each project")
+	root.PersistentFlags().BoolVar(&noGit, "no-git", false, "skip git commit collection")
 
 	root.AddCommand(yesterdayCmd())
 	root.AddCommand(weekCmd())
+	root.AddCommand(monthCmd())
 	root.AddCommand(standupCmd())
 
 	if err := root.Execute(); err != nil {
@@ -68,6 +75,16 @@ func weekCmd() *cobra.Command {
 		Short: "Show this week's activity summary",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return run(weekRange())
+		},
+	}
+}
+
+func monthCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "month",
+		Short: "Show this month's activity summary",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run(monthRange())
 		},
 	}
 }
@@ -98,20 +115,26 @@ func standupCmd() *cobra.Command {
 func run(dr model.DateRange) error {
 	cfg := config.Load()
 
-	collectors := []collector.Collector{
-		collector.NewClaudeCollector(cfg.ClaudeDir, showCost),
-		collector.NewGitCollector(cfg.GitRepoPaths),
-	}
+	collectors := buildCollectors(cfg)
 
 	var allActivities []model.Activity
 	for _, c := range collectors {
 		if !c.Available() {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "[debrief] skipping %s: not available\n", c.Name())
+			}
 			continue
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "[debrief] collecting from %s...\n", c.Name())
 		}
 		activities, err := c.Collect(dr)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", c.Name(), err)
 			continue
+		}
+		if verbose {
+			fmt.Fprintf(os.Stderr, "[debrief] %s: %d activities found\n", c.Name(), len(activities))
 		}
 		allActivities = append(allActivities, activities...)
 	}
@@ -128,7 +151,7 @@ func run(dr model.DateRange) error {
 		outputFormat = "text"
 	}
 
-	opts := ui.RenderOptions{ShowCost: showCost}
+	opts := ui.RenderOptions{ShowCost: showCost, Detail: detail}
 
 	singleDay := len(days) <= 1
 
@@ -147,14 +170,21 @@ func run(dr model.DateRange) error {
 			fmt.Print(ui.RenderStandup(day, opts))
 		}
 
+	case "markdown":
+		for i, day := range days {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Print(ui.RenderMarkdown(day, opts))
+		}
+
 	default:
 		if showCost {
 			for _, day := range days {
 				fmt.Print(ui.RenderCost(day, opts))
 			}
-			weekCost := collectCostForRange(cfg, weekRange())
-			monthCost := collectCostForRange(cfg, monthRange())
-			fmt.Print(ui.RenderCostFooter(aggregator.Aggregate(allActivities).TotalCost, weekCost, monthCost))
+			costSummary := buildCostSummary(cfg, allActivities, dr)
+			fmt.Print(ui.RenderCostFooter(costSummary))
 		} else {
 			for i, day := range days {
 				if i > 0 {
@@ -170,20 +200,66 @@ func run(dr model.DateRange) error {
 	return nil
 }
 
-// collectCostForRange runs collectors for a date range and returns total cost.
-func collectCostForRange(cfg config.Config, dr model.DateRange) float64 {
-	collectors := []collector.Collector{
-		collector.NewClaudeCollector(cfg.ClaudeDir, true),
+func buildCollectors(cfg config.Config) []collector.Collector {
+	var collectors []collector.Collector
+	collectors = append(collectors, collector.NewClaudeCollector(cfg.ClaudeDir, showCost))
+	if !noGit {
+		collectors = append(collectors, collector.NewGitCollector(cfg.GitRepoPaths))
 	}
-	var all []model.Activity
-	for _, c := range collectors {
-		if !c.Available() {
-			continue
-		}
-		activities, _ := c.Collect(dr)
-		all = append(all, activities...)
+	return collectors
+}
+
+// buildCostSummary builds cost summary, reusing already-collected activities
+// and only fetching wider ranges when the current range doesn't cover them.
+func buildCostSummary(cfg config.Config, currentActivities []model.Activity, currentDR model.DateRange) ui.CostSummary {
+	currentSummary := aggregator.Aggregate(currentActivities)
+
+	wr := weekRange()
+	mr := monthRange()
+
+	// If current range covers week, reuse. Otherwise collect.
+	var weekSummary model.DaySummary
+	if !currentDR.Start.After(wr.Start) && !currentDR.End.Before(wr.End) {
+		weekSummary = currentSummary
+	} else {
+		weekSummary = aggregator.Aggregate(collectCostActivities(cfg, wr))
 	}
-	return aggregator.Aggregate(all).TotalCost
+
+	// If current range covers month, reuse. Otherwise collect.
+	var monthSummary model.DaySummary
+	if !currentDR.Start.After(mr.Start) && !currentDR.End.Before(mr.End) {
+		monthSummary = currentSummary
+	} else {
+		monthSummary = aggregator.Aggregate(collectCostActivities(cfg, mr))
+	}
+
+	// Determine period label based on range.
+	periodLabel := "Today"
+	days := int(currentDR.End.Sub(currentDR.Start).Hours() / 24)
+	if days > 20 {
+		periodLabel = "This month"
+	} else if days > 2 {
+		periodLabel = "This week"
+	}
+
+	return ui.CostSummary{
+		PeriodLabel:  periodLabel,
+		PeriodCost:   currentSummary.TotalCost,
+		WeekCost:     weekSummary.TotalCost,
+		MonthCost:    monthSummary.TotalCost,
+		WeekByModel:  weekSummary.ByModel,
+		MonthByModel: monthSummary.ByModel,
+	}
+}
+
+// collectCostActivities runs Claude collector for a date range and returns activities.
+func collectCostActivities(cfg config.Config, dr model.DateRange) []model.Activity {
+	c := collector.NewClaudeCollector(cfg.ClaudeDir, true)
+	if !c.Available() {
+		return nil
+	}
+	activities, _ := c.Collect(dr)
+	return activities
 }
 
 // splitByDay groups activities into per-day summaries.
