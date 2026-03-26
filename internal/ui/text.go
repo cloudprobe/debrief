@@ -11,10 +11,11 @@ import (
 
 // RenderOptions controls what's shown in the output.
 type RenderOptions struct {
-	ShowCost bool
+	ShowCost  bool
+	SingleDay bool // true when showing a single day (adds "Your day —" prefix)
 }
 
-// RenderText produces a plain text summary for terminal output.
+// RenderText produces a plain text summary — what you actually did.
 func RenderText(summary model.DaySummary, opts RenderOptions) string {
 	if len(summary.Activities) == 0 {
 		return "No activity found for this period.\n"
@@ -23,72 +24,56 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 	var b strings.Builder
 
 	date := summary.Date.Format("Monday, Jan 2 2006")
-	fmt.Fprintf(&b, "\n  devrecap — %s\n", date)
+	if opts.SingleDay {
+		fmt.Fprintf(&b, "\n  Your day — %s\n", date)
+	} else {
+		fmt.Fprintf(&b, "\n  %s\n", date)
+	}
 	b.WriteString("  " + strings.Repeat("─", 54) + "\n\n")
 
-	for _, p := range sortedProjects(summary.ByProject) {
+	projects := sortedProjects(summary.ByProject)
+	totalFiles := 0
+	totalCommits := 0
+
+	for _, p := range projects {
 		fmt.Fprintf(&b, "  %s\n", p.Name)
 
-		// Stats line.
-		var stats []string
-		if p.Interactions > 0 {
-			stats = append(stats, plural(p.Interactions, "interaction"))
-		}
-		if p.TotalTokens > 0 {
-			stats = append(stats, fmt.Sprintf("%s tokens", formatTokens(p.TotalTokens)))
-		}
-		if opts.ShowCost && p.TotalCost > 0 {
-			stats = append(stats, fmt.Sprintf("$%.2f", p.TotalCost))
-		}
-		if len(p.Models) > 0 {
-			stats = append(stats, strings.Join(shortModelNames(p.Models), ", "))
-		}
-		if len(stats) > 0 {
-			fmt.Fprintf(&b, "    %s\n", strings.Join(stats, " · "))
+		// Activity description.
+		if desc := describeActivity(p); desc != "" {
+			fmt.Fprintf(&b, "    %s\n", desc)
 		}
 
-		// Files line — the actual work product.
+		// Files line.
 		if fileLine := formatFileSummary(p.FilesCreated, p.FilesModified); fileLine != "" {
 			fmt.Fprintf(&b, "    %s\n", fileLine)
 		}
+		totalFiles += len(p.FilesCreated) + len(p.FilesModified)
 
-		// Commits.
+		// Commit messages.
 		if p.CommitCount > 0 {
-			fmt.Fprintf(&b, "    %s\n", plural(p.CommitCount, "commit"))
+			fmt.Fprintf(&b, "    %s\n", formatCommitMessages(p.CommitMessages, p.CommitCount))
+			totalCommits += p.CommitCount
 		}
 
-		b.WriteString("\n")
-	}
-
-	// Model token breakdown.
-	if len(summary.ByModel) > 0 {
-		b.WriteString("  Models\n")
-		for _, m := range sortedModels(summary.ByModel) {
-			tokens := m.TokensIn + m.TokensOut
-			line := fmt.Sprintf("    %-24s %s tokens", shortModelName(m.Name), formatTokens(tokens))
-			if opts.ShowCost && m.TotalCost > 0 {
-				line += fmt.Sprintf("  $%.2f", m.TotalCost)
-			}
-			b.WriteString(line + "\n")
-		}
 		b.WriteString("\n")
 	}
 
 	// Footer.
 	b.WriteString("  " + strings.Repeat("─", 54) + "\n")
-	totalLine := fmt.Sprintf("  %s · %s tokens",
-		plural(summary.Interactions, "interaction"),
-		formatTokens(summary.TotalTokens),
-	)
-	if opts.ShowCost && summary.TotalCost > 0 {
-		totalLine += fmt.Sprintf(" · $%.2f", summary.TotalCost)
+	var parts []string
+	parts = append(parts, plural(len(projects), "repo"))
+	if totalFiles > 0 {
+		parts = append(parts, plural(totalFiles, "file")+" changed")
 	}
-	b.WriteString(totalLine + "\n\n")
+	if totalCommits > 0 {
+		parts = append(parts, plural(totalCommits, "commit"))
+	}
+	fmt.Fprintf(&b, "  %s\n\n", strings.Join(parts, " · "))
 
 	return b.String()
 }
 
-// RenderStandup produces a conversational, copy-paste ready standup summary.
+// RenderStandup produces plain text bullet points for your team.
 func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 	if len(summary.Activities) == 0 {
 		return "No activity to report.\n"
@@ -96,12 +81,11 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 
 	var b strings.Builder
 
-	date := summary.Date.Format("Jan 2")
-	fmt.Fprintf(&b, "**%s:**\n", date)
+	date := summary.Date.Format("Jan 2 2006")
+	fmt.Fprintf(&b, "%s:\n", date)
 
 	projects := sortedProjects(summary.ByProject)
 
-	// Split into primary work (significant) and minor touches.
 	var primary, minor []model.ProjectSummary
 	for _, p := range projects {
 		if p.Interactions >= 5 || len(p.FilesCreated)+len(p.FilesModified) >= 3 || p.CommitCount >= 2 {
@@ -112,7 +96,7 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 	}
 
 	for _, p := range primary {
-		fmt.Fprintf(&b, "• %s\n", describeProject(p))
+		fmt.Fprintf(&b, "• %s\n", describeProjectStandup(p))
 	}
 
 	if len(minor) > 0 {
@@ -126,25 +110,109 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 	return b.String()
 }
 
-// describeProject generates a conversational description of work on a project.
-func describeProject(p model.ProjectSummary) string {
+// RenderCost produces a billing view — project/model/cost.
+func RenderCost(summary model.DaySummary, opts RenderOptions) string {
+	if len(summary.Activities) == 0 {
+		return "No cost data for this period.\n"
+	}
+
+	var b strings.Builder
+
+	date := summary.Date.Format("Monday, Jan 2 2006")
+	fmt.Fprintf(&b, "\n  Cost — %s\n", date)
+	b.WriteString("  " + strings.Repeat("─", 54) + "\n\n")
+
+	projects := sortedProjects(summary.ByProject)
+	for _, p := range projects {
+		if p.TotalCost <= 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "  %-40s $%.2f\n", p.Name, p.TotalCost)
+
+		// Models under each project.
+		type modelCost struct {
+			name string
+			cost float64
+		}
+		var models []modelCost
+		for _, a := range summary.Activities {
+			if a.Project == p.Name && a.CostUSD > 0 {
+				models = append(models, modelCost{name: shortModelName(a.Model), cost: a.CostUSD})
+			}
+		}
+		// Merge by model name.
+		merged := make(map[string]float64)
+		for _, m := range models {
+			merged[m.name] += m.cost
+		}
+		var sorted []modelCost
+		for name, cost := range merged {
+			sorted = append(sorted, modelCost{name: name, cost: cost})
+		}
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].cost > sorted[j].cost })
+		for _, m := range sorted {
+			fmt.Fprintf(&b, "    %-26s $%.2f\n", m.name, m.cost)
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+// RenderCostFooter renders the today/week/month cost summary line.
+func RenderCostFooter(todayCost, weekCost, monthCost float64) string {
+	var b strings.Builder
+	b.WriteString("  " + strings.Repeat("─", 54) + "\n")
+	fmt.Fprintf(&b, "  Today: $%.2f · This week: $%.2f · This month: $%.2f\n\n", todayCost, weekCost, monthCost)
+	return b.String()
+}
+
+// describeActivity generates a conversational one-liner for the default view.
+func describeActivity(p model.ProjectSummary) string {
 	created := len(p.FilesCreated)
 	modified := len(p.FilesModified)
-	totalFiles := created + modified
+	hasAI := hasSource(p.Sources, "claude-code")
+	suffix := ""
+	if hasAI {
+		suffix = " with Claude"
+	}
 
-	// Determine the activity type from what actually happened.
 	switch {
 	case created >= 5:
-		// Significant new code — scaffolding/building.
-		return fmt.Sprintf("Built out **%s** — created %s (%s)",
+		return fmt.Sprintf("Built out new code%s", suffix)
+	case created > 0 && modified > 0:
+		return fmt.Sprintf("Worked on code%s", suffix)
+	case modified >= 3:
+		return fmt.Sprintf("Iterated on existing code%s", suffix)
+	case created > 0 || modified > 0:
+		return fmt.Sprintf("Made updates%s", suffix)
+	case p.CommitCount > 0 && !hasAI:
+		// Git-only — no description line, just show commits.
+		return ""
+	case p.Interactions >= 10:
+		return fmt.Sprintf("Researched and planned%s", suffix)
+	case hasAI:
+		return fmt.Sprintf("Quick exploration%s", suffix)
+	default:
+		return ""
+	}
+}
+
+// describeProjectStandup generates a conversational description for standup bullets.
+func describeProjectStandup(p model.ProjectSummary) string {
+	created := len(p.FilesCreated)
+	modified := len(p.FilesModified)
+
+	switch {
+	case created >= 5:
+		return fmt.Sprintf("Built out %s — %s (%s)",
 			p.Name,
 			plural(created, "new file"),
 			topCodeFileNames(p.FilesCreated, p.FilesModified, 4),
 		)
 
 	case created > 0 && modified > 0:
-		// Mix of new and updated files.
-		return fmt.Sprintf("Worked on **%s** — %s created, %s updated (%s)",
+		return fmt.Sprintf("Worked on %s — %s created, %s updated (%s)",
 			p.Name,
 			plural(created, "file"),
 			plural(modified, "file"),
@@ -152,46 +220,72 @@ func describeProject(p model.ProjectSummary) string {
 		)
 
 	case modified >= 3:
-		// Mostly editing existing code.
-		return fmt.Sprintf("Iterated on **%s** — updated %s (%s)",
+		return fmt.Sprintf("Iterated on %s — updated %s (%s)",
 			p.Name,
 			plural(modified, "file"),
 			topCodeFileNames(nil, p.FilesModified, 4),
 		)
 
-	case totalFiles > 0:
-		// Small file changes.
-		return fmt.Sprintf("Updated **%s** — %s (%s)",
+	case created+modified > 0:
+		return fmt.Sprintf("Updated %s — %s (%s)",
 			p.Name,
-			plural(totalFiles, "file"),
+			plural(created+modified, "file"),
 			topCodeFileNames(p.FilesCreated, p.FilesModified, 4),
 		)
 
 	case p.CommitCount > 0:
-		// Git commits but no AI file tracking.
-		return fmt.Sprintf("Shipped %s in **%s**",
+		return fmt.Sprintf("Shipped %s in %s",
 			plural(p.CommitCount, "commit"),
 			p.Name,
 		)
 
 	case p.Interactions >= 10:
-		// Lots of interaction but no files — research/planning/debugging.
-		return fmt.Sprintf("Researched and planned in **%s** (%s)",
+		return fmt.Sprintf("Researched and planned in %s",
 			p.Name,
-			plural(p.Interactions, "AI interaction"),
 		)
 
 	default:
-		// Light interaction.
-		return fmt.Sprintf("Explored **%s** (%s)",
-			p.Name,
-			plural(p.Interactions, "interaction"),
-		)
+		return fmt.Sprintf("Explored %s", p.Name)
 	}
 }
 
-// topCodeFileNames returns a short string of the most important file names
-// from both created and modified lists.
+// formatCommitMessages formats commit messages for display.
+func formatCommitMessages(messages []string, count int) string {
+	if len(messages) == 0 {
+		return plural(count, "commit")
+	}
+
+	max := 3
+	shown := messages
+	if len(shown) > max {
+		shown = shown[:max]
+	}
+
+	var quoted []string
+	for _, m := range shown {
+		if len(m) > 60 {
+			m = m[:57] + "..."
+		}
+		quoted = append(quoted, fmt.Sprintf("%q", m))
+	}
+
+	result := "Committed: " + strings.Join(quoted, ", ")
+	if count > max {
+		result += fmt.Sprintf(" +%d more", count-max)
+	}
+	return result
+}
+
+func hasSource(sources []string, name string) bool {
+	for _, s := range sources {
+		if s == name {
+			return true
+		}
+	}
+	return false
+}
+
+// topCodeFileNames returns a short string of the most important file names.
 func topCodeFileNames(created, modified []string, max int) string {
 	files := prioritizeFiles(created, modified)
 	if len(files) == 0 {
@@ -216,15 +310,14 @@ func formatFileSummary(created, modified []string) string {
 		return ""
 	}
 
-	// Merge all file names for a combined display, prioritizing code files.
 	allFiles := prioritizeFiles(created, modified)
 
 	var prefix []string
 	if len(created) > 0 {
-		prefix = append(prefix, plural(len(created), "file")+" created")
+		prefix = append(prefix, fmt.Sprintf("Created %s", plural(len(created), "file")))
 	}
 	if len(modified) > 0 {
-		prefix = append(prefix, plural(len(modified), "file")+" modified")
+		prefix = append(prefix, fmt.Sprintf("updated %s", plural(len(modified), "file")))
 	}
 
 	line := strings.Join(prefix, ", ")
@@ -286,14 +379,11 @@ func isCodeFile(name string) bool {
 func shortModelName(model string) string {
 	m := strings.ToLower(model)
 
-	// Anthropic models.
 	for _, family := range []string{"opus", "sonnet", "haiku"} {
 		if strings.Contains(m, family) {
-			// Extract version: claude-opus-4-6 → 4.6, claude-haiku-4-5-20251001 → 4.5
 			parts := strings.Split(m, family+"-")
 			if len(parts) == 2 {
 				ver := parts[1]
-				// Take first two numeric segments: "4-6" → "4.6", "4-5-20251001" → "4.5"
 				segments := strings.SplitN(ver, "-", 3)
 				if len(segments) >= 2 {
 					return family + " " + segments[0] + "." + segments[1]
@@ -306,17 +396,7 @@ func shortModelName(model string) string {
 		}
 	}
 
-	// OpenAI models — pass through.
-	// Google models — pass through.
 	return model
-}
-
-func shortModelNames(models []string) []string {
-	out := make([]string, len(models))
-	for i, m := range models {
-		out[i] = shortModelName(m)
-	}
-	return out
 }
 
 func plural(n int, word string) string {
@@ -345,15 +425,4 @@ func sortedProjects(m map[string]model.ProjectSummary) []model.ProjectSummary {
 		return ps[i].Interactions > ps[j].Interactions
 	})
 	return ps
-}
-
-func sortedModels(m map[string]model.ModelSummary) []model.ModelSummary {
-	var ms []model.ModelSummary
-	for _, v := range m {
-		ms = append(ms, v)
-	}
-	sort.Slice(ms, func(i, j int) bool {
-		return (ms[i].TokensIn + ms[i].TokensOut) > (ms[j].TokensIn + ms[j].TokensOut)
-	})
-	return ms
 }

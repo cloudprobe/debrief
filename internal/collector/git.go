@@ -118,7 +118,7 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 		return nil, nil
 	}
 
-	project := filepath.Base(repoPath)
+	project := repoSlug(repoPath)
 	var commits int
 	var messages []string
 	var earliest, latest time.Time
@@ -164,6 +164,39 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 		CommitCount:    commits,
 		CommitMessages: messages,
 	}, nil
+}
+
+// repoSlug returns "org/repo" from the git remote URL, falling back to the directory name.
+func repoSlug(repoPath string) string {
+	out, err := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
+	if err == nil {
+		if slug := parseRepoSlug(strings.TrimSpace(string(out))); slug != "" {
+			return slug
+		}
+	}
+	return filepath.Base(repoPath)
+}
+
+// parseRepoSlug extracts "org/repo" from a git remote URL.
+// Handles HTTPS (https://github.com/org/repo.git) and SSH (git@github.com:org/repo.git).
+func parseRepoSlug(url string) string {
+	url = strings.TrimSuffix(url, ".git")
+
+	// SSH: git@github.com:org/repo
+	if i := strings.Index(url, ":"); i > 0 && !strings.Contains(url[:i], "/") {
+		parts := strings.Split(url[i+1:], "/")
+		if len(parts) >= 2 {
+			return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+		}
+	}
+
+	// HTTPS: https://github.com/org/repo
+	parts := strings.Split(url, "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+	}
+
+	return ""
 }
 
 func getCurrentBranch(repoPath string) string {

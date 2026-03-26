@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -332,12 +333,26 @@ func extractFilePath(input json.RawMessage) string {
 	return params.FilePath
 }
 
-// projectFromCWD extracts a project name from a working directory path.
+var slugCache = make(map[string]string)
+
+// projectFromCWD extracts an "org/repo" project name from a working directory.
+// Falls back to the directory base name if no git remote is found.
 func projectFromCWD(cwd string) string {
 	if cwd == "" {
 		return "unknown"
 	}
-	return filepath.Base(cwd)
+	if cached, ok := slugCache[cwd]; ok {
+		return cached
+	}
+	result := filepath.Base(cwd)
+	out, err := exec.Command("git", "-C", cwd, "remote", "get-url", "origin").Output()
+	if err == nil {
+		if slug := parseRepoSlug(strings.TrimSpace(string(out))); slug != "" {
+			result = slug
+		}
+	}
+	slugCache[cwd] = result
+	return result
 }
 
 // topKey returns the key with the highest count in a map.

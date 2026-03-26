@@ -20,32 +20,29 @@ func TestRenderText_ShowsProject(t *testing.T) {
 	s := model.DaySummary{
 		Date: time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC),
 		Activities: []model.Activity{
-			{Project: "devrecap", Interactions: 10, TokensIn: 50000, TokensOut: 10000},
+			{Project: "cloudprobe/devrecap", Source: "claude-code", Interactions: 10, TokensIn: 50000, TokensOut: 10000},
 		},
 		TotalTokens:  60000,
 		Interactions: 10,
 		ByProject: map[string]model.ProjectSummary{
-			"devrecap": {
-				Name:         "devrecap",
+			"cloudprobe/devrecap": {
+				Name:         "cloudprobe/devrecap",
 				Interactions: 10,
 				TotalTokens:  60000,
-				Models:       []string{"claude-opus-4-6"},
+				Sources:      []string{"claude-code"},
 				FilesCreated: []string{"main.go", "model.go", "collector.go"},
 			},
 		},
-		ByModel: map[string]model.ModelSummary{
-			"claude-opus-4-6": {Name: "claude-opus-4-6", TokensIn: 50000, TokensOut: 10000},
-		},
+		ByModel: map[string]model.ModelSummary{},
 	}
 
-	got := RenderText(s, RenderOptions{})
+	got := RenderText(s, RenderOptions{SingleDay: true})
 
 	checks := []string{
-		"devrecap",
-		"10 interactions",
-		"60.0K tokens",
-		"opus 4.6",
-		"3 files created",
+		"Your day",
+		"cloudprobe/devrecap",
+		"with Claude",
+		"Created 3 files",
 		"main.go",
 	}
 	for _, want := range checks {
@@ -53,31 +50,69 @@ func TestRenderText_ShowsProject(t *testing.T) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}
 	}
+
+	// Should NOT contain tokens or model names.
+	unwanted := []string{"tokens", "opus", "interactions"}
+	for _, bad := range unwanted {
+		if strings.Contains(got, bad) {
+			t.Errorf("output should not contain %q:\n%s", bad, got)
+		}
+	}
 }
 
-func TestRenderText_CostHiddenByDefault(t *testing.T) {
+func TestRenderText_CommitMessages(t *testing.T) {
 	s := model.DaySummary{
-		Date:       time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC),
-		Activities: []model.Activity{{Project: "x"}},
-		TotalCost:  1.50,
+		Date: time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC),
+		Activities: []model.Activity{
+			{Project: "dotfiles", Source: "git", CommitCount: 2},
+		},
 		ByProject: map[string]model.ProjectSummary{
-			"x": {Name: "x", TotalCost: 1.50},
+			"dotfiles": {
+				Name:           "dotfiles",
+				CommitCount:    2,
+				CommitMessages: []string{"add zsh aliases", "update gitconfig"},
+				Sources:        []string{"git"},
+			},
 		},
 		ByModel: map[string]model.ModelSummary{},
 	}
 
-	got := RenderText(s, RenderOptions{ShowCost: false})
-	if strings.Contains(got, "$") {
-		t.Errorf("cost should be hidden by default:\n%s", got)
-	}
+	got := RenderText(s, RenderOptions{})
 
-	got = RenderText(s, RenderOptions{ShowCost: true})
-	if !strings.Contains(got, "$1.50") {
-		t.Errorf("cost should show with --cost:\n%s", got)
+	if !strings.Contains(got, "Committed:") {
+		t.Errorf("expected commit messages:\n%s", got)
+	}
+	if !strings.Contains(got, "add zsh aliases") {
+		t.Errorf("expected commit message text:\n%s", got)
 	}
 }
 
-func TestRenderStandup_Conversational(t *testing.T) {
+func TestRenderText_GitOnlyProject(t *testing.T) {
+	s := model.DaySummary{
+		Date: time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC),
+		Activities: []model.Activity{
+			{Project: "dotfiles", Source: "git", CommitCount: 2},
+		},
+		ByProject: map[string]model.ProjectSummary{
+			"dotfiles": {
+				Name:           "dotfiles",
+				CommitCount:    2,
+				CommitMessages: []string{"fix bug", "add test"},
+				Sources:        []string{"git"},
+			},
+		},
+		ByModel: map[string]model.ModelSummary{},
+	}
+
+	got := RenderText(s, RenderOptions{})
+
+	// Git-only should NOT say "with Claude".
+	if strings.Contains(got, "Claude") {
+		t.Errorf("git-only project should not mention Claude:\n%s", got)
+	}
+}
+
+func TestRenderStandup_PlainText(t *testing.T) {
 	s := model.DaySummary{
 		Date: time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC),
 		Activities: []model.Activity{
@@ -104,6 +139,39 @@ func TestRenderStandup_Conversational(t *testing.T) {
 	}
 	if !strings.Contains(got, "Minor work on") {
 		t.Errorf("expected 'Minor work on' for small project:\n%s", got)
+	}
+	// No markdown bold.
+	if strings.Contains(got, "**") {
+		t.Errorf("standup should not contain markdown bold:\n%s", got)
+	}
+	// Should include year.
+	if !strings.Contains(got, "2026") {
+		t.Errorf("standup should include year:\n%s", got)
+	}
+}
+
+func TestRenderCost(t *testing.T) {
+	s := model.DaySummary{
+		Date:      time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC),
+		TotalCost: 2.50,
+		Activities: []model.Activity{
+			{Project: "cloudprobe/devrecap", Model: "claude-opus-4-6", CostUSD: 2.50, Source: "claude-code"},
+		},
+		ByProject: map[string]model.ProjectSummary{
+			"cloudprobe/devrecap": {
+				Name:      "cloudprobe/devrecap",
+				TotalCost: 2.50,
+			},
+		},
+		ByModel: map[string]model.ModelSummary{},
+	}
+
+	got := RenderCost(s, RenderOptions{ShowCost: true})
+	if !strings.Contains(got, "$2.50") {
+		t.Errorf("expected cost in output:\n%s", got)
+	}
+	if !strings.Contains(got, "opus 4.6") {
+		t.Errorf("expected model name in cost view:\n%s", got)
 	}
 }
 
@@ -149,5 +217,15 @@ func TestPlural(t *testing.T) {
 	}
 	if got := plural(3, "file"); got != "3 files" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestFormatCommitMessages(t *testing.T) {
+	got := formatCommitMessages([]string{"add auth", "fix bug"}, 2)
+	if !strings.Contains(got, "Committed:") {
+		t.Errorf("expected Committed prefix: %s", got)
+	}
+	if !strings.Contains(got, "add auth") {
+		t.Errorf("expected message text: %s", got)
 	}
 }
