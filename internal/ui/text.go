@@ -215,7 +215,14 @@ func RenderCostFooter(cs CostSummary) string {
 	if label == "" {
 		label = "Today"
 	}
-	fmt.Fprintf(&b, "  %s: $%.2f · This week: $%.2f · This month: $%.2f\n", label, cs.PeriodCost, cs.WeekCost, cs.MonthCost)
+	switch label {
+	case "This month":
+		fmt.Fprintf(&b, "  This month: $%.2f\n", cs.MonthCost)
+	case "This week":
+		fmt.Fprintf(&b, "  This week: $%.2f · This month: $%.2f\n", cs.WeekCost, cs.MonthCost)
+	default:
+		fmt.Fprintf(&b, "  %s: $%.2f · This week: $%.2f · This month: $%.2f\n", label, cs.PeriodCost, cs.WeekCost, cs.MonthCost)
+	}
 
 	// Week per-model breakdown.
 	if len(cs.WeekByModel) > 0 {
