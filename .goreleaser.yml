@@ -30,7 +30,9 @@ changelog:
       - "^test:"
       - "^ci:"
 
-homebrew_casks:
+# brews is deprecated in goreleaser v2 but homebrew_casks is for GUI apps,
+# not CLI binaries. brews still works and is the correct choice here.
+brews:
   - repository:
       owner: cloudprobe
       name: homebrew-tap
