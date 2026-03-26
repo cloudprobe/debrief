@@ -15,7 +15,7 @@ test:
 
 lint:
 	go vet ./...
-	@which golangci-lint > /dev/null 2>&1 && golangci-lint run || echo "golangci-lint not installed, skipping"
+	golangci-lint run
 
 clean:
 	rm -rf bin/ dist/

@@ -23,11 +23,11 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 	var b strings.Builder
 
 	date := summary.Date.Format("Monday, Jan 2 2006")
-	b.WriteString(fmt.Sprintf("\n  devrecap — %s\n", date))
+	fmt.Fprintf(&b, "\n  devrecap — %s\n", date)
 	b.WriteString("  " + strings.Repeat("─", 54) + "\n\n")
 
 	for _, p := range sortedProjects(summary.ByProject) {
-		b.WriteString(fmt.Sprintf("  %s\n", p.Name))
+		fmt.Fprintf(&b, "  %s\n", p.Name)
 
 		// Stats line.
 		var stats []string
@@ -44,17 +44,17 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 			stats = append(stats, strings.Join(shortModelNames(p.Models), ", "))
 		}
 		if len(stats) > 0 {
-			b.WriteString(fmt.Sprintf("    %s\n", strings.Join(stats, " · ")))
+			fmt.Fprintf(&b, "    %s\n", strings.Join(stats, " · "))
 		}
 
 		// Files line — the actual work product.
 		if fileLine := formatFileSummary(p.FilesCreated, p.FilesModified); fileLine != "" {
-			b.WriteString(fmt.Sprintf("    %s\n", fileLine))
+			fmt.Fprintf(&b, "    %s\n", fileLine)
 		}
 
 		// Commits.
 		if p.CommitCount > 0 {
-			b.WriteString(fmt.Sprintf("    %s\n", plural(p.CommitCount, "commit")))
+			fmt.Fprintf(&b, "    %s\n", plural(p.CommitCount, "commit"))
 		}
 
 		b.WriteString("\n")
@@ -97,7 +97,7 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 	var b strings.Builder
 
 	date := summary.Date.Format("Jan 2")
-	b.WriteString(fmt.Sprintf("**%s:**\n", date))
+	fmt.Fprintf(&b, "**%s:**\n", date)
 
 	projects := sortedProjects(summary.ByProject)
 
@@ -112,7 +112,7 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 	}
 
 	for _, p := range primary {
-		b.WriteString(fmt.Sprintf("• %s\n", describeProject(p)))
+		fmt.Fprintf(&b, "• %s\n", describeProject(p))
 	}
 
 	if len(minor) > 0 {
@@ -120,7 +120,7 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 		for _, p := range minor {
 			names = append(names, p.Name)
 		}
-		b.WriteString(fmt.Sprintf("• Minor work on %s\n", strings.Join(names, ", ")))
+		fmt.Fprintf(&b, "• Minor work on %s\n", strings.Join(names, ", "))
 	}
 
 	return b.String()

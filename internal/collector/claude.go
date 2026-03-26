@@ -191,7 +191,7 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Key: "sessionID:project" → accumulator
 	accums := make(map[string]*projectAccum)
