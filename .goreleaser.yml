@@ -1,0 +1,40 @@
+version: 2
+
+builds:
+  - main: ./cmd/devrecap
+    binary: devrecap
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+brews:
+  - repository:
+      owner: cloudprobe
+      name: homebrew-tap
+    homepage: https://github.com/cloudprobe/devrecap
+    description: Know what you actually did today, including your AI sessions
+    license: MIT
+    install: |
+      bin.install "devrecap"
