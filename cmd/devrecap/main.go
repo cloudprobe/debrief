@@ -8,6 +8,7 @@ import (
 
 	"github.com/cloudprobe/devrecap/internal/aggregator"
 	"github.com/cloudprobe/devrecap/internal/collector"
+	"github.com/cloudprobe/devrecap/internal/config"
 	"github.com/cloudprobe/devrecap/internal/model"
 	"github.com/cloudprobe/devrecap/internal/ui"
 	"github.com/spf13/cobra"
@@ -25,9 +26,20 @@ func main() {
 		Use:     "devrecap",
 		Short:   "Know what you actually did today, including your AI sessions",
 		Version: version,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dr := todayRange()
+			if date != "" {
+				var err error
+				dr, err = parseDateRange(date)
+				if err != nil {
+					return err
+				}
+			}
+			return run(dr)
+		},
 	}
 
-	root.PersistentFlags().StringVar(&format, "format", "text", "output format: text, json, standup")
+	root.PersistentFlags().StringVar(&format, "format", "", "output format: text, json, standup")
 	root.PersistentFlags().StringVar(&date, "date", "", "specific date (YYYY-MM-DD)")
 	root.PersistentFlags().BoolVar(&showCost, "cost", false, "show estimated API costs (for pay-per-token users)")
 
@@ -91,8 +103,11 @@ func standupCmd() *cobra.Command {
 }
 
 func run(dr model.DateRange) error {
+	cfg := config.Load()
+
 	collectors := []collector.Collector{
-		collector.NewClaudeCollector("", showCost),
+		collector.NewClaudeCollector(cfg.ClaudeDir, showCost),
+		collector.NewGitCollector(cfg.GitRepoPaths),
 	}
 
 	var allActivities []model.Activity
@@ -109,9 +124,19 @@ func run(dr model.DateRange) error {
 	}
 
 	summary := aggregator.Aggregate(allActivities)
+
+	// Resolve format: flag > config > default.
+	outputFormat := format
+	if outputFormat == "" {
+		outputFormat = cfg.DefaultFormat
+	}
+	if outputFormat == "" {
+		outputFormat = "text"
+	}
+
 	opts := ui.RenderOptions{ShowCost: showCost}
 
-	switch format {
+	switch outputFormat {
 	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
