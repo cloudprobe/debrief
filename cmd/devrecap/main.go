@@ -88,10 +88,7 @@ func standupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Default standup = yesterday
-			if date == "" && fromDate == "" && toDate == "" {
-				dr = yesterdayRange()
-			}
+			// Default standup = today (same as base command).
 			return run(dr)
 		},
 	}
