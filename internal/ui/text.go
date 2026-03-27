@@ -61,12 +61,6 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 			fmt.Fprintf(&b, "    \u2022 %s\n", msg)
 		}
 		totalCommits += p.CommitCount
-		// AI footnote: only if AI activity present.
-		if hasSource(p.Sources, "claude-code") && p.TotalTokens > 0 {
-			models := strings.Join(p.Models, ", ")
-			tokens := formatTokens(p.TotalTokens)
-			fmt.Fprintf(&b, "    [%s, ~%s tokens]\n", shortModelName(models), tokens)
-		}
 		b.WriteString("\n")
 	}
 
@@ -124,10 +118,6 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 				break
 			}
 			fmt.Fprintf(&b, "  \u2022 %s\n", msg)
-		}
-		if hasSource(p.Sources, "claude-code") && p.TotalTokens > 0 {
-			models := strings.Join(p.Models, ", ")
-			fmt.Fprintf(&b, "  [%s, ~%s tokens]\n", shortModelName(models), formatTokens(p.TotalTokens))
 		}
 		b.WriteString("\n")
 	}
@@ -270,10 +260,6 @@ func RenderMarkdown(summary model.DaySummary, opts RenderOptions) string {
 		}
 		if len(p.CommitMessages) > 0 {
 			b.WriteString("\n")
-		}
-		if hasSource(p.Sources, "claude-code") && p.TotalTokens > 0 {
-			models := strings.Join(p.Models, ", ")
-			fmt.Fprintf(&b, "*%s, ~%s tokens*\n", shortModelName(models), formatTokens(p.TotalTokens))
 		}
 		b.WriteString("\n")
 	}
@@ -435,6 +421,9 @@ func sortedProjects(m map[string]model.ProjectSummary) []model.ProjectSummary {
 		ps = append(ps, p)
 	}
 	sort.Slice(ps, func(i, j int) bool {
+		if ps[i].CommitCount != ps[j].CommitCount {
+			return ps[i].CommitCount > ps[j].CommitCount
+		}
 		return ps[i].Interactions > ps[j].Interactions
 	})
 	return ps
