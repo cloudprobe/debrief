@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -265,105 +264,6 @@ func RenderMarkdown(summary model.DaySummary, opts RenderOptions) string {
 	}
 
 	return b.String()
-}
-
-func hasSource(sources []string, name string) bool {
-	for _, s := range sources {
-		if s == name {
-			return true
-		}
-	}
-	return false
-}
-
-// topCodeFileNames returns a short string of the most important file names.
-func topCodeFileNames(created, modified []string, max int) string {
-	files := prioritizeFiles(created, modified)
-	if len(files) == 0 {
-		return ""
-	}
-	shown := files
-	more := 0
-	if len(shown) > max {
-		shown = shown[:max]
-		more = len(files) - max
-	}
-	result := strings.Join(shown, ", ")
-	if more > 0 {
-		result += fmt.Sprintf(" +%d more", more)
-	}
-	return result
-}
-
-// formatFileSummary builds a concise line showing files created and modified.
-func formatFileSummary(created, modified []string) string {
-	if len(created) == 0 && len(modified) == 0 {
-		return ""
-	}
-
-	allFiles := prioritizeFiles(created, modified)
-
-	var prefix []string
-	if len(created) > 0 {
-		prefix = append(prefix, fmt.Sprintf("Created %s", plural(len(created), "file")))
-	}
-	if len(modified) > 0 {
-		prefix = append(prefix, fmt.Sprintf("updated %s", plural(len(modified), "file")))
-	}
-
-	line := strings.Join(prefix, ", ")
-	if len(allFiles) > 0 {
-		shown := allFiles
-		more := 0
-		if len(shown) > 6 {
-			shown = shown[:6]
-			more = len(allFiles) - 6
-		}
-		line += " \u2014 " + strings.Join(shown, ", ")
-		if more > 0 {
-			line += fmt.Sprintf(" +%d more", more)
-		}
-	}
-
-	return line
-}
-
-// prioritizeFiles returns deduplicated base file names, code files first.
-func prioritizeFiles(created, modified []string) []string {
-	seen := make(map[string]bool)
-	var code, other []string
-
-	add := func(paths []string) {
-		for _, p := range paths {
-			base := filepath.Base(p)
-			if seen[base] {
-				continue
-			}
-			seen[base] = true
-			if isCodeFile(base) {
-				code = append(code, base)
-			} else {
-				other = append(other, base)
-			}
-		}
-	}
-
-	add(created)
-	add(modified)
-	return append(code, other...)
-}
-
-var codeExtensions = map[string]bool{
-	".go": true, ".py": true, ".js": true, ".ts": true, ".tsx": true,
-	".jsx": true, ".rs": true, ".java": true, ".c": true, ".cpp": true,
-	".h": true, ".rb": true, ".swift": true, ".kt": true, ".scala": true,
-	".sh": true, ".bash": true, ".zsh": true, ".tf": true, ".hcl": true,
-	".sql": true, ".proto": true, ".graphql": true, ".css": true,
-	".html": true, ".vue": true, ".svelte": true,
-}
-
-func isCodeFile(name string) bool {
-	return codeExtensions[filepath.Ext(name)]
 }
 
 // shortModelName converts "claude-opus-4-6" → "opus 4.6".

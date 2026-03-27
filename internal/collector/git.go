@@ -62,12 +62,12 @@ func (g *GitCollector) discoverRepos(w io.Writer) []string {
 	for _, scanPath := range g.scanPaths {
 		before := len(repos)
 		if _, err := os.Stat(scanPath); os.IsNotExist(err) {
-			fmt.Fprintf(w, "warning: git scan path does not exist: %s\n", scanPath)
+			fmt.Fprintf(w, "warning: git scan path does not exist: %s\n", scanPath) //nolint:errcheck
 			continue
 		}
 		g.scanDir(scanPath, 0, seen, &repos)
 		if len(repos) == before {
-			fmt.Fprintf(w, "warning: no git repos found under: %s\n", scanPath)
+			fmt.Fprintf(w, "warning: no git repos found under: %s\n", scanPath) //nolint:errcheck
 		}
 	}
 	return repos
