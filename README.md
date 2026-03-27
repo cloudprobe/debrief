@@ -1,5 +1,7 @@
 # debrief
 
+[![CI](https://github.com/cloudprobe/debrief/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudprobe/debrief/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/cloudprobe/debrief)](https://github.com/cloudprobe/debrief/releases/latest) [![License](https://img.shields.io/github/license/cloudprobe/debrief)](LICENSE) [![Go Version](https://img.shields.io/github/go-mod/go-version/cloudprobe/debrief)](go.mod) [![Coverage](https://codecov.io/gh/cloudprobe/debrief/branch/main/graph/badge.svg)](https://codecov.io/gh/cloudprobe/debrief)
+
 Know what you actually did today — git commits, AI sessions, one command.
 
 ## Install
@@ -113,6 +115,10 @@ default_format: text  # text, json, standup, markdown
 | `--verbose` | `-v` | Debug output on stderr |
 | `--detail` | | Show per-session detail |
 | `--no-git` | | Skip git collection |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
