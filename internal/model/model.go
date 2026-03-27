@@ -9,7 +9,6 @@ type Activity struct {
 	SessionTitle   string         `json:"session_title,omitempty"` // human-readable session name
 	Timestamp      time.Time      `json:"timestamp"`
 	EndTime        time.Time      `json:"end_time"`
-	Duration       time.Duration  `json:"duration"`
 	Project        string         `json:"project"` // derived from cwd or repo name
 	Branch         string         `json:"branch"`
 	Model          string         `json:"model"` // primary AI model used (empty for git)
@@ -46,7 +45,6 @@ type ProjectSummary struct {
 	Sessions       []Activity     `json:"sessions,omitempty"` // per-session detail
 	Models         []string       `json:"models"`
 	Sources        []string       `json:"sources"`
-	Duration       time.Duration  `json:"duration"`
 }
 
 // ModelSummary aggregates token usage and cost by AI model.

@@ -43,7 +43,6 @@ func Aggregate(activities []model.Activity) model.DaySummary {
 		p.Deletions += a.Deletions
 		p.SessionCount++
 		p.Sessions = append(p.Sessions, a)
-		p.Duration += a.Duration
 		p.Sources = appendUnique(p.Sources, a.Source)
 		if a.Model != "" {
 			p.Models = appendUnique(p.Models, a.Model)

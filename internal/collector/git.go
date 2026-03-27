@@ -165,7 +165,6 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 		SessionID:      project,
 		Timestamp:      earliest,
 		EndTime:        latest,
-		Duration:       latest.Sub(earliest),
 		Project:        project,
 		Branch:         branch,
 		CommitCount:    commits,

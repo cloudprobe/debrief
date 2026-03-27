@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -133,7 +132,6 @@ type projectAccum struct {
 	tools         map[string]int  // tool name → call count
 	filesCreated  map[string]bool // unique file paths
 	filesModified map[string]bool // unique file paths
-	msgTimestamps []time.Time     // for duration estimation
 }
 
 func newProjectAccum(project, cwd, branch, sessionID string, ts time.Time) *projectAccum {
@@ -158,27 +156,6 @@ func (pa *projectAccum) touch(ts time.Time) {
 	if ts.After(pa.lastSeen) {
 		pa.lastSeen = ts
 	}
-	pa.msgTimestamps = append(pa.msgTimestamps, ts)
-}
-
-// estimateDuration sums gaps between messages, capping each gap at 5 min.
-func (pa *projectAccum) estimateDuration() time.Duration {
-	if len(pa.msgTimestamps) < 2 {
-		return 0
-	}
-	sort.Slice(pa.msgTimestamps, func(i, j int) bool {
-		return pa.msgTimestamps[i].Before(pa.msgTimestamps[j])
-	})
-	var total time.Duration
-	maxGap := 5 * time.Minute
-	for i := 1; i < len(pa.msgTimestamps); i++ {
-		gap := pa.msgTimestamps[i].Sub(pa.msgTimestamps[i-1])
-		if gap > maxGap {
-			gap = maxGap
-		}
-		total += gap
-	}
-	return total
 }
 
 // addFile records a file path, making it relative to the project CWD
@@ -367,7 +344,6 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			SessionTitle:  title,
 			Timestamp:     pa.firstSeen,
 			EndTime:       pa.lastSeen,
-			Duration:      pa.estimateDuration(),
 			Project:       pa.project,
 			Branch:        pa.branch,
 			Model:         primaryModel,
