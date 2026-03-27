@@ -75,7 +75,7 @@ func (g *GitCollector) discoverRepos(w io.Writer) []string {
 
 // scanDir recursively walks dir up to g.maxDepth levels, collecting git repos.
 func (g *GitCollector) scanDir(dir string, depth int, seen map[string]bool, repos *[]string) {
-	if depth >= g.maxDepth {
+	if depth > g.maxDepth {
 		return
 	}
 	entries, err := os.ReadDir(dir)

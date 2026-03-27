@@ -56,6 +56,7 @@ func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 	// Collect.
 	g := &GitCollector{
 		scanPaths: []string{dir},
+		maxDepth:  2,
 		author:    "test@example.com",
 	}
 
@@ -88,6 +89,46 @@ func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 	}
 	if a.Branch != "main" {
 		t.Errorf("branch: got %q, want %q", a.Branch, "main")
+	}
+}
+
+func TestGitCollector_DiscoverReposDepth2(t *testing.T) {
+	tmpdir := t.TempDir()
+
+	// Create a repo nested 2 levels deep: tmpdir/level1/level2/myrepo/.git/
+	repoPath := filepath.Join(tmpdir, "level1", "level2", "myrepo")
+	if err := os.MkdirAll(filepath.Join(repoPath, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	g := NewGitCollector([]string{tmpdir}, 2)
+	repos := g.discoverRepos(&bytes.Buffer{})
+
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d: %v", len(repos), repos)
+	}
+	if filepath.Base(repos[0]) != "myrepo" {
+		t.Errorf("expected repo named myrepo, got %s", repos[0])
+	}
+}
+
+func TestGitCollector_DiscoverReposWarning(t *testing.T) {
+	tmpdir := t.TempDir()
+
+	// Create an empty subdir with no .git repos.
+	if err := os.MkdirAll(filepath.Join(tmpdir, "empty-subdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	g := NewGitCollector([]string{tmpdir}, 2)
+	var buf bytes.Buffer
+	repos := g.discoverRepos(&buf)
+
+	if len(repos) != 0 {
+		t.Fatalf("expected 0 repos, got %d: %v", len(repos), repos)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("warning:")) {
+		t.Errorf("expected warning output, got: %q", buf.String())
 	}
 }
 
