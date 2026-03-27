@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cloudprobe/debrief/internal/aggregator"
@@ -12,6 +15,7 @@ import (
 	"github.com/cloudprobe/debrief/internal/model"
 	"github.com/cloudprobe/debrief/internal/ui"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -51,6 +55,7 @@ func main() {
 	root.AddCommand(weekCmd())
 	root.AddCommand(monthCmd())
 	root.AddCommand(standupCmd())
+	root.AddCommand(configureCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -108,6 +113,75 @@ func standupCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func configureCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "configure",
+		Short: "Set up debrief for first use",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runConfigure()
+		},
+	}
+}
+
+func runConfigure() error {
+	// Load existing config so we can show current preset as default.
+	existing := config.Load()
+
+	currentPreset := existing.Pricing.Preset
+	if currentPreset == "" {
+		currentPreset = "direct"
+	}
+
+	fmt.Println("How do you access Claude Code?")
+	fmt.Println("  1) direct  — Anthropic API (pay per token)")
+	fmt.Println("  2) max     — Max or Pro subscription (flat rate)")
+	fmt.Println("  3) vertex  — Google Vertex AI")
+	fmt.Println("  4) bedrock — AWS Bedrock")
+	fmt.Printf("Preset [%s]: ", currentPreset)
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("reading input: %w", err)
+	}
+	input = strings.TrimSpace(input)
+	if input == "" {
+		input = currentPreset
+	}
+
+	validPresets := map[string]bool{
+		"direct":  true,
+		"max":     true,
+		"vertex":  true,
+		"bedrock": true,
+	}
+	if !validPresets[input] {
+		return fmt.Errorf("unknown preset %q — choose: direct, max, vertex, bedrock", input)
+	}
+
+	// Write updated config. Preserve all existing fields, update only Pricing.Preset.
+	existing.Pricing.Preset = input
+
+	dir := config.ConfigDir()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(existing)
+	if err != nil {
+		return fmt.Errorf("serializing config: %w", err)
+	}
+
+	cfgFile := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgFile, data, 0600); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+
+	fmt.Printf("Configuration saved to %s\n", cfgFile)
+	fmt.Println("Run `debrief` to see today's summary.")
+	return nil
 }
 
 func run(dr model.DateRange) error {
@@ -177,6 +251,20 @@ func run(dr model.DateRange) error {
 		}
 
 	default:
+		// Cost gate: preset must be explicitly configured (per D-07, D-08, D-13, D-14).
+		// Scoped inside default: branch — standup and markdown ignore --cost and never reach this.
+		if showCost {
+			preset := cfg.Pricing.Preset
+			if preset == "" {
+				fmt.Println("Cost view requires setup. Run `debrief configure` to get started.")
+				return nil
+			}
+			if preset == "max" {
+				fmt.Println("You're on a Max/Pro subscription — per-token costs don't apply.")
+				fmt.Println("Use `debrief` to see your activity summary.")
+				return nil
+			}
+		}
 		if showCost {
 			for _, day := range days {
 				fmt.Print(ui.RenderCost(day, opts))
