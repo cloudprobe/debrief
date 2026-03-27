@@ -186,7 +186,6 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 
 	return &model.Activity{
 		Source:         "git",
-		SessionID:      project,
 		Timestamp:      earliest,
 		EndTime:        latest,
 		Project:        project,

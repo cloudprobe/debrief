@@ -56,23 +56,6 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 			fmt.Fprintf(&b, "    %s\n", desc)
 		}
 
-		// Session detail (when --detail is set).
-		if opts.Detail && len(p.Sessions) > 0 {
-			for _, s := range p.Sessions {
-				if s.Source != "claude-code" {
-					continue
-				}
-				title := s.SessionTitle
-				if title == "" {
-					title = "(untitled)"
-				}
-				modelName := shortModelName(s.Model)
-				line := fmt.Sprintf("    \"%s\"  %s  %s  %s",
-					title, modelName, plural(s.Interactions, "msg"), formatCost(s.CostUSD))
-				fmt.Fprintf(&b, "%s\n", line)
-			}
-		}
-
 		// Files line.
 		if fileLine := formatFileSummary(p.FilesCreated, p.FilesModified); fileLine != "" {
 			fmt.Fprintf(&b, "    %s\n", fileLine)
@@ -106,9 +89,6 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 			commitPart += fmt.Sprintf(" · +%d -%d lines", totalInsertions, totalDeletions)
 		}
 		parts = append(parts, commitPart)
-	}
-	if summary.DeepSessions > 0 {
-		parts = append(parts, plural(summary.DeepSessions, "deep session"))
 	}
 	fmt.Fprintf(&b, "  %s\n\n", strings.Join(parts, " · "))
 

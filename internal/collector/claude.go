@@ -17,14 +17,12 @@ const claudeBaseDir = ".claude/projects"
 
 // claudeRecord is the raw JSONL record from Claude Code session files.
 type claudeRecord struct {
-	Type        string          `json:"type"`
-	SessionID   string          `json:"sessionId"`
-	Timestamp   time.Time       `json:"timestamp"`
-	CWD         string          `json:"cwd"`
-	GitBranch   string          `json:"gitBranch"`
-	Message     json.RawMessage `json:"message"`
-	CustomTitle string          `json:"customTitle"` // type=custom-title
-	LastPrompt  string          `json:"lastPrompt"`  // type=last-prompt
+	Type      string          `json:"type"`
+	SessionID string          `json:"sessionId"`
+	Timestamp time.Time       `json:"timestamp"`
+	CWD       string          `json:"cwd"`
+	GitBranch string          `json:"gitBranch"`
+	Message   json.RawMessage `json:"message"`
 }
 
 // claudeAssistantMsg represents the assistant message envelope.
@@ -214,10 +212,6 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 	// Dedup assistant messages by message.id — keep last (most complete) chunk.
 	assistantMsgs := make(map[string]deferredMsg) // message.id → last record
 
-	// Session metadata: custom titles and last prompts.
-	sessionTitles := make(map[string]string)     // sessionID → custom title
-	sessionLastPrompt := make(map[string]string) // sessionID → last prompt
-
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
@@ -228,17 +222,6 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 		}
 
 		if rec.Timestamp.Before(dr.Start) || rec.Timestamp.After(dr.End) {
-			// Still parse metadata records outside the range for session context.
-			switch rec.Type {
-			case "custom-title":
-				if rec.CustomTitle != "" && rec.SessionID != "" {
-					sessionTitles[rec.SessionID] = rec.CustomTitle
-				}
-			case "last-prompt":
-				if rec.LastPrompt != "" && rec.SessionID != "" {
-					sessionLastPrompt[rec.SessionID] = rec.LastPrompt
-				}
-			}
 			continue
 		}
 
@@ -267,15 +250,6 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 				assistantMsgs[peek.ID] = deferredMsg{rec: rec, raw: rec.Message}
 			}
 
-		case "custom-title":
-			if rec.CustomTitle != "" && rec.SessionID != "" {
-				sessionTitles[rec.SessionID] = rec.CustomTitle
-			}
-
-		case "last-prompt":
-			if rec.LastPrompt != "" && rec.SessionID != "" {
-				sessionLastPrompt[rec.SessionID] = rec.LastPrompt
-			}
 		}
 	}
 
@@ -337,19 +311,8 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			}
 		}
 
-		// Resolve session title: custom-title > last-prompt > empty.
-		title := sessionTitles[pa.sessionID]
-		if title == "" {
-			title = sessionLastPrompt[pa.sessionID]
-		}
-		if len(title) > 60 {
-			title = title[:57] + "..."
-		}
-
 		activities = append(activities, model.Activity{
 			Source:        "claude-code",
-			SessionID:     pa.project,
-			SessionTitle:  title,
 			Timestamp:     pa.firstSeen,
 			EndTime:       pa.lastSeen,
 			Project:       pa.project,

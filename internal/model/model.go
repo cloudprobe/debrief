@@ -5,8 +5,6 @@ import "time"
 // Activity represents a unified activity record from any source.
 type Activity struct {
 	Source         string         `json:"source"` // "claude-code", "git"
-	SessionID      string         `json:"session_id"`
-	SessionTitle   string         `json:"session_title,omitempty"` // human-readable session name
 	Timestamp      time.Time      `json:"timestamp"`
 	EndTime        time.Time      `json:"end_time"`
 	Project        string         `json:"project"` // derived from cwd or repo name
@@ -41,10 +39,9 @@ type ProjectSummary struct {
 	CommitMessages []string       `json:"commit_messages"`
 	Insertions     int            `json:"insertions"`
 	Deletions      int            `json:"deletions"`
-	SessionCount   int            `json:"session_count"`
-	Sessions       []Activity     `json:"sessions,omitempty"` // per-session detail
 	Models         []string       `json:"models"`
 	Sources        []string       `json:"sources"`
+	SummaryLine    string         `json:"summary_line,omitempty"`
 }
 
 // ModelSummary aggregates token usage and cost by AI model.
@@ -63,7 +60,6 @@ type DaySummary struct {
 	TotalCost    float64                   `json:"total_cost"`
 	TotalTokens  int                       `json:"total_tokens"`
 	Interactions int                       `json:"interactions"`
-	DeepSessions int                       `json:"deep_sessions"` // sustained work blocks (>30 min)
 	ByProject    map[string]ProjectSummary `json:"by_project"`
 	ByModel      map[string]ModelSummary   `json:"by_model"`
 }
