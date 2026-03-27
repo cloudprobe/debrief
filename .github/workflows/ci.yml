@@ -29,9 +29,9 @@ jobs:
         run: go vet ./...
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v5
+        uses: coverallsapp/github-action@v2
         with:
-          files: coverage.out
+          file: coverage.out
 
   lint:
     runs-on: ubuntu-latest
