@@ -1,37 +1,92 @@
 package collector
 
+import "github.com/cloudprobe/debrief/internal/config"
+
 // ModelPricing holds per-million-token rates for a model.
 type ModelPricing struct {
 	InputPerMillion  float64
 	OutputPerMillion float64
 }
 
-// PricingTable maps model identifiers to their pricing.
-// Rates are in USD per 1 million tokens.
-var PricingTable = map[string]ModelPricing{
-	// Anthropic
-	"claude-opus-4-6":            {InputPerMillion: 5.0, OutputPerMillion: 25.0},
-	"claude-sonnet-4-6":          {InputPerMillion: 3.0, OutputPerMillion: 15.0},
-	"claude-haiku-4-5":           {InputPerMillion: 1.0, OutputPerMillion: 5.0},
-	"claude-haiku-4-5-20251001":  {InputPerMillion: 1.0, OutputPerMillion: 5.0},
-	"claude-sonnet-4-5-20250514": {InputPerMillion: 3.0, OutputPerMillion: 15.0},
-	// OpenAI
-	"gpt-4o":      {InputPerMillion: 2.5, OutputPerMillion: 10.0},
-	"gpt-4o-mini": {InputPerMillion: 0.15, OutputPerMillion: 0.60},
-	"o3":          {InputPerMillion: 10.0, OutputPerMillion: 40.0},
-	"o3-mini":     {InputPerMillion: 1.10, OutputPerMillion: 4.40},
-	// Google
-	"gemini-2.5-pro":   {InputPerMillion: 1.25, OutputPerMillion: 10.0},
-	"gemini-2.5-flash": {InputPerMillion: 0.15, OutputPerMillion: 0.60},
+// EffectivePricing returns the pricing table to use, merging preset + overrides.
+func EffectivePricing(cfg config.PricingConfig) map[string]ModelPricing {
+	base := presetTable(cfg.Preset)
+	if len(cfg.Overrides) == 0 {
+		return base
+	}
+	// Copy base and apply overrides.
+	merged := make(map[string]ModelPricing, len(base))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for model, rate := range cfg.Overrides {
+		merged[model] = ModelPricing{
+			InputPerMillion:  rate.InputPerMillion,
+			OutputPerMillion: rate.OutputPerMillion,
+		}
+	}
+	return merged
 }
 
-// CalculateCost computes the USD cost for a given token usage and model.
+func presetTable(preset string) map[string]ModelPricing {
+	switch preset {
+	case "vertex":
+		return vertexTable()
+	case "bedrock":
+		return bedrockTable()
+	default: // "direct" or ""
+		return directTable()
+	}
+}
+
+// directTable returns the current Anthropic direct API pricing rates.
+// Rates are in USD per 1 million tokens.
+// Source: https://platform.claude.com/docs/en/about-claude/pricing (2026-03-26)
+func directTable() map[string]ModelPricing {
+	return map[string]ModelPricing{
+		// Anthropic Claude 4.x
+		"claude-opus-4-6":            {InputPerMillion: 5.0, OutputPerMillion: 25.0},
+		"claude-opus-4-5":            {InputPerMillion: 5.0, OutputPerMillion: 25.0},
+		"claude-sonnet-4-6":          {InputPerMillion: 3.0, OutputPerMillion: 15.0},
+		"claude-sonnet-4-5-20250514": {InputPerMillion: 3.0, OutputPerMillion: 15.0},
+		"claude-sonnet-4-5@20250514": {InputPerMillion: 3.0, OutputPerMillion: 15.0},
+		"claude-haiku-4-5":           {InputPerMillion: 1.0, OutputPerMillion: 5.0},
+		"claude-haiku-4-5-20251001":  {InputPerMillion: 1.0, OutputPerMillion: 5.0},
+		"claude-haiku-4-5@20251001":  {InputPerMillion: 1.0, OutputPerMillion: 5.0},
+		"claude-haiku-3-5":           {InputPerMillion: 0.80, OutputPerMillion: 4.0},
+		// OpenAI
+		"gpt-4o":      {InputPerMillion: 2.5, OutputPerMillion: 10.0},
+		"gpt-4o-mini": {InputPerMillion: 0.15, OutputPerMillion: 0.60},
+		"o3":          {InputPerMillion: 10.0, OutputPerMillion: 40.0},
+		"o3-mini":     {InputPerMillion: 1.10, OutputPerMillion: 4.40},
+		// Google
+		"gemini-2.5-pro":   {InputPerMillion: 1.25, OutputPerMillion: 10.0},
+		"gemini-2.5-flash": {InputPerMillion: 0.15, OutputPerMillion: 0.60},
+	}
+}
+
+// vertexTable returns pricing for Google Vertex AI.
+// For current Claude 4.x models, global endpoint pricing matches direct API.
+// Source: https://cloud.google.com/vertex-ai/pricing (2026-03-26)
+func vertexTable() map[string]ModelPricing {
+	return directTable()
+}
+
+// bedrockTable returns pricing for AWS Bedrock.
+// For current Claude 4.x models, on-demand global endpoint pricing matches direct API.
+// Source: https://aws.amazon.com/bedrock/pricing (2026-03-26)
+func bedrockTable() map[string]ModelPricing {
+	return directTable()
+}
+
+// CalculateCost returns (cost, known).
+// known=false means the model has no configured price; caller should display "—".
 // Cache read tokens are charged at 10% of the input rate.
 // Cache write tokens are charged at 125% of the input rate.
-func CalculateCost(modelName string, tokensIn, tokensOut, cacheRead, cacheWrite int) float64 {
-	pricing, ok := PricingTable[modelName]
+func CalculateCost(table map[string]ModelPricing, modelName string, tokensIn, tokensOut, cacheRead, cacheWrite int) (float64, bool) {
+	pricing, ok := table[modelName]
 	if !ok {
-		return 0
+		return 0, false
 	}
 
 	inputCost := float64(tokensIn) * pricing.InputPerMillion / 1_000_000
@@ -39,5 +94,5 @@ func CalculateCost(modelName string, tokensIn, tokensOut, cacheRead, cacheWrite 
 	cacheReadCost := float64(cacheRead) * pricing.InputPerMillion * 0.10 / 1_000_000
 	cacheWriteCost := float64(cacheWrite) * pricing.InputPerMillion * 1.25 / 1_000_000
 
-	return inputCost + outputCost + cacheReadCost + cacheWriteCost
+	return inputCost + outputCost + cacheReadCost + cacheWriteCost, true
 }
