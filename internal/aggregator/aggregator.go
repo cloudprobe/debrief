@@ -1,7 +1,9 @@
 package aggregator
 
 import (
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/cloudprobe/debrief/internal/model"
 )
@@ -67,7 +69,92 @@ func Aggregate(activities []model.Activity) model.DaySummary {
 		}
 	}
 
+	// Derive summary lines for each project.
+	for name, p := range summary.ByProject {
+		p.SummaryLine = deriveProjectSummaryLine(p)
+		summary.ByProject[name] = p
+	}
+
 	return summary
+}
+
+// deriveProjectSummaryLine generates a one-line headline for a project.
+// Commits take priority per D-03; file changes are the fallback.
+func deriveProjectSummaryLine(p model.ProjectSummary) string {
+	if len(p.CommitMessages) > 0 {
+		return summarizeCommits(p.CommitMessages)
+	}
+	if len(p.FilesCreated) > 0 || len(p.FilesModified) > 0 {
+		return describeFromFiles(p.FilesCreated, p.FilesModified)
+	}
+	return ""
+}
+
+// conventionalPrefixes are recognized conventional commit type prefixes.
+var conventionalPrefixes = map[string]bool{
+	"feat": true, "fix": true, "test": true, "chore": true,
+	"docs": true, "refactor": true, "perf": true, "build": true, "ci": true,
+}
+
+// stripConventionalPrefix removes "feat:", "fix(scope):", etc. from a commit message.
+func stripConventionalPrefix(msg string) string {
+	parts := strings.SplitN(msg, ":", 2)
+	if len(parts) != 2 {
+		return msg
+	}
+	prefix := strings.ToLower(strings.TrimSpace(parts[0]))
+	// Strip scope: feat(auth) -> feat
+	if i := strings.Index(prefix, "("); i > 0 {
+		prefix = prefix[:i]
+	}
+	if conventionalPrefixes[prefix] {
+		return strings.TrimSpace(parts[1])
+	}
+	return msg
+}
+
+// summarizeCommits produces a headline from commit messages.
+// Strips conventional prefixes and joins up to 3 descriptions.
+func summarizeCommits(messages []string) string {
+	if len(messages) == 0 {
+		return ""
+	}
+	var stripped []string
+	for _, m := range messages {
+		s := stripConventionalPrefix(m)
+		if s != "" {
+			// Capitalize first letter.
+			s = strings.ToUpper(s[:1]) + s[1:]
+			stripped = append(stripped, s)
+		}
+	}
+	if len(stripped) == 0 {
+		return ""
+	}
+	if len(stripped) == 1 {
+		return stripped[0]
+	}
+	if len(stripped) == 2 {
+		// Lowercase second item for natural joining.
+		return stripped[0] + " and " + strings.ToLower(stripped[1][:1]) + stripped[1][1:]
+	}
+	// 3+: use first and mention count.
+	return fmt.Sprintf("%s and %d other changes", stripped[0], len(stripped)-1)
+}
+
+// describeFromFiles produces a headline from file changes when no commits exist.
+func describeFromFiles(created, modified []string) string {
+	total := len(created) + len(modified)
+	if total == 0 {
+		return ""
+	}
+	if len(created) > 0 && len(modified) > 0 {
+		return fmt.Sprintf("Created %d files and modified %d files", len(created), len(modified))
+	}
+	if len(created) > 0 {
+		return fmt.Sprintf("Created %d files", len(created))
+	}
+	return fmt.Sprintf("Modified %d files", len(modified))
 }
 
 func mergeToolBreakdown(dst, src map[string]int) map[string]int {
