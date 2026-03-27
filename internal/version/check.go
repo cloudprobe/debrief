@@ -45,10 +45,13 @@ func CheckForUpdate(cacheDir, current string) (UpdateInfo, bool) {
 		_ = json.Unmarshal(data, &c)
 	}
 
-	// Determine latest version: use cache if fresh, otherwise fetch.
+	// Determine latest version: use cache if fresh and not outdated, otherwise fetch.
+	// Also invalidate if running version is newer than cached latest (e.g. after an upgrade).
+	cachedIsStale := time.Since(c.CheckedAt) >= checkTTL || c.LatestVersion == ""
+	cachedIsBehind := c.LatestVersion != "" && newerThan(current, c.LatestVersion)
 	var latest string
-	if time.Since(c.CheckedAt) < checkTTL && c.LatestVersion != "" {
-		// Cache is still fresh — use it.
+	if !cachedIsStale && !cachedIsBehind {
+		// Cache is still fresh and valid — use it.
 		latest = c.LatestVersion
 	} else {
 		// Fetch from GitHub with a short timeout.
@@ -76,15 +79,51 @@ func CheckForUpdate(cacheDir, current string) (UpdateInfo, bool) {
 		return UpdateInfo{}, false
 	}
 
-	// Normalize: strip leading "v" for comparison.
-	cur := strings.TrimPrefix(current, "v")
-	lat := strings.TrimPrefix(latest, "v")
-
-	if lat <= cur {
+	if !newerThan(latest, current) {
 		return UpdateInfo{}, false
 	}
 
 	return UpdateInfo{Current: current, Latest: latest}, true
+}
+
+// newerThan returns true if version a is strictly newer than version b.
+// Handles semver-style strings like "v0.4.1" or "0.10.0".
+func newerThan(a, b string) bool {
+	return compareVersions(strings.TrimPrefix(a, "v"), strings.TrimPrefix(b, "v")) > 0
+}
+
+// compareVersions compares two "X.Y.Z" version strings numerically.
+// Returns 1 if a > b, -1 if a < b, 0 if equal.
+func compareVersions(a, b string) int {
+	aParts := strings.SplitN(a, ".", 3)
+	bParts := strings.SplitN(b, ".", 3)
+	for len(aParts) < 3 {
+		aParts = append(aParts, "0")
+	}
+	for len(bParts) < 3 {
+		bParts = append(bParts, "0")
+	}
+	for i := 0; i < 3; i++ {
+		av, bv := atoi(aParts[i]), atoi(bParts[i])
+		if av > bv {
+			return 1
+		}
+		if av < bv {
+			return -1
+		}
+	}
+	return 0
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			break
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 // fetchLatest calls the GitHub releases API and returns the latest tag name.
