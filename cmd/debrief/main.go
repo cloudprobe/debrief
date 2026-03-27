@@ -187,6 +187,12 @@ func runConfigure() error {
 		input = currentPreset
 	}
 
+	// Accept numeric shortcut (1-4) as shown in the menu.
+	numericPresets := map[string]string{"1": "direct", "2": "max", "3": "vertex", "4": "bedrock"}
+	if name, ok := numericPresets[input]; ok {
+		input = name
+	}
+
 	validPresets := map[string]bool{
 		"direct":  true,
 		"max":     true,
