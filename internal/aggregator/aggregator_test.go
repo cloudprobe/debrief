@@ -168,3 +168,78 @@ func TestAggregate_DeduplicatesModelsAndFiles(t *testing.T) {
 		t.Errorf("files_created should be deduplicated: got %v", p.FilesCreated)
 	}
 }
+
+func TestAggregate_SummaryLine(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name         string
+		activities   []model.Activity
+		project      string
+		wantNonEmpty bool
+	}{
+		{
+			name: "commits produce summary",
+			activities: []model.Activity{
+				{
+					Source: "git", Project: "proj", Timestamp: now,
+					CommitCount: 2, CommitMessages: []string{"feat: add auth", "fix: resolve login bug"},
+				},
+			},
+			project:      "proj",
+			wantNonEmpty: true,
+		},
+		{
+			name: "files only produce summary",
+			activities: []model.Activity{
+				{
+					Source: "claude-code", Project: "proj", Timestamp: now,
+					Interactions: 5, FilesCreated: []string{"main.go", "util.go"},
+				},
+			},
+			project:      "proj",
+			wantNonEmpty: true,
+		},
+		{
+			name: "no commits no files empty summary",
+			activities: []model.Activity{
+				{
+					Source: "claude-code", Project: "proj", Timestamp: now,
+					Interactions: 2,
+				},
+			},
+			project:      "proj",
+			wantNonEmpty: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := Aggregate(tt.activities)
+			p := s.ByProject[tt.project]
+			if tt.wantNonEmpty && p.SummaryLine == "" {
+				t.Error("expected non-empty SummaryLine")
+			}
+			if !tt.wantNonEmpty && p.SummaryLine != "" {
+				t.Errorf("expected empty SummaryLine, got %q", p.SummaryLine)
+			}
+		})
+	}
+}
+
+func TestStripConventionalPrefix(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"feat: add auth", "add auth"},
+		{"fix(login): resolve bug", "resolve bug"},
+		{"chore: update deps", "update deps"},
+		{"plain message", "plain message"},
+		{"feat(scope): scoped feature", "scoped feature"},
+	}
+	for _, tt := range tests {
+		got := stripConventionalPrefix(tt.input)
+		if got != tt.want {
+			t.Errorf("stripConventionalPrefix(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
