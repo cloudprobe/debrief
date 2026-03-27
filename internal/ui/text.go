@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/cloudprobe/debrief/internal/model"
 )
@@ -55,11 +54,6 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 		// Activity description.
 		if desc := describeActivity(p); desc != "" {
 			fmt.Fprintf(&b, "    %s\n", desc)
-		}
-
-		// Duration.
-		if p.Duration > 0 {
-			fmt.Fprintf(&b, "    ~%s active\n", formatDuration(p.Duration))
 		}
 
 		// Session detail (when --detail is set).
@@ -275,10 +269,6 @@ func RenderMarkdown(summary model.DaySummary, opts RenderOptions) string {
 
 		if desc := describeActivity(p); desc != "" {
 			fmt.Fprintf(&b, "- %s\n", desc)
-		}
-
-		if p.Duration > 0 {
-			fmt.Fprintf(&b, "- ~%s active\n", formatDuration(p.Duration))
 		}
 
 		if fileLine := formatFileSummary(p.FilesCreated, p.FilesModified); fileLine != "" {
@@ -545,19 +535,6 @@ func formatTokens(n int) string {
 		return fmt.Sprintf("%.1fK", float64(n)/1_000)
 	}
 	return fmt.Sprintf("%d", n)
-}
-
-// formatDuration formats a duration as "1h 23m" or "45m".
-func formatDuration(d time.Duration) string {
-	hours := int(d.Hours())
-	minutes := int(d.Minutes()) % 60
-	if hours > 0 {
-		return fmt.Sprintf("%dh %dm", hours, minutes)
-	}
-	if minutes > 0 {
-		return fmt.Sprintf("%dm", minutes)
-	}
-	return "< 1m"
 }
 
 func sortedProjects(m map[string]model.ProjectSummary) []model.ProjectSummary {
