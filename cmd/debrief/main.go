@@ -56,6 +56,7 @@ func main() {
 	root.AddCommand(monthCmd())
 	root.AddCommand(standupCmd())
 	root.AddCommand(configureCmd())
+	root.AddCommand(completionCmd(root))
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -113,6 +114,32 @@ func standupCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func completionCmd(root *cobra.Command) *cobra.Command {
+	return &cobra.Command{
+		Use:   "completion <shell>",
+		Short: "Generate shell completion script (bash, zsh, fish)",
+		Long: `Output a shell completion script to stdout.
+
+Bash:   source <(debrief completion bash)
+Zsh:    debrief completion zsh > "${fpath[1]}/_debrief"
+Fish:   debrief completion fish | source`,
+		Args:      cobra.ExactArgs(1),
+		ValidArgs: []string{"bash", "zsh", "fish"},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch args[0] {
+			case "bash":
+				return root.GenBashCompletion(os.Stdout)
+			case "zsh":
+				return root.GenZshCompletion(os.Stdout)
+			case "fish":
+				return root.GenFishCompletion(os.Stdout, true)
+			default:
+				return fmt.Errorf("unsupported shell %q — supported: bash, zsh, fish", args[0])
+			}
+		},
+	}
 }
 
 func configureCmd() *cobra.Command {
