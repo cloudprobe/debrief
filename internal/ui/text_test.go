@@ -31,6 +31,7 @@ func TestRenderText_ShowsProject(t *testing.T) {
 				TotalTokens:  60000,
 				Sources:      []string{"claude-code"},
 				FilesCreated: []string{"main.go", "model.go", "collector.go"},
+				SummaryLine:  "Created 3 files",
 			},
 		},
 		ByModel: map[string]model.ModelSummary{},
@@ -41,21 +42,11 @@ func TestRenderText_ShowsProject(t *testing.T) {
 	checks := []string{
 		"Your day",
 		"cloudprobe/devrecap",
-		"with Claude",
 		"Created 3 files",
-		"main.go",
 	}
 	for _, want := range checks {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%s", want, got)
-		}
-	}
-
-	// Should NOT contain tokens or model names.
-	unwanted := []string{"tokens", "opus", "interactions"}
-	for _, bad := range unwanted {
-		if strings.Contains(got, bad) {
-			t.Errorf("output should not contain %q:\n%s", bad, got)
 		}
 	}
 }
@@ -72,6 +63,7 @@ func TestRenderText_CommitMessages(t *testing.T) {
 				CommitCount:    2,
 				CommitMessages: []string{"add zsh aliases", "update gitconfig"},
 				Sources:        []string{"git"},
+				SummaryLine:    "Add zsh aliases and update gitconfig",
 			},
 		},
 		ByModel: map[string]model.ModelSummary{},
@@ -79,11 +71,11 @@ func TestRenderText_CommitMessages(t *testing.T) {
 
 	got := RenderText(s, RenderOptions{})
 
-	if !strings.Contains(got, "Committed:") {
-		t.Errorf("expected commit messages:\n%s", got)
-	}
 	if !strings.Contains(got, "add zsh aliases") {
 		t.Errorf("expected commit message text:\n%s", got)
+	}
+	if !strings.Contains(got, "update gitconfig") {
+		t.Errorf("expected second commit message:\n%s", got)
 	}
 }
 
@@ -99,6 +91,7 @@ func TestRenderText_GitOnlyProject(t *testing.T) {
 				CommitCount:    2,
 				CommitMessages: []string{"fix bug", "add test"},
 				Sources:        []string{"git"},
+				SummaryLine:    "Fix bug and add test",
 			},
 		},
 		ByModel: map[string]model.ModelSummary{},
@@ -106,9 +99,19 @@ func TestRenderText_GitOnlyProject(t *testing.T) {
 
 	got := RenderText(s, RenderOptions{})
 
-	// Git-only should NOT say "with Claude".
+	// Git-only should show project name and commit bullets.
+	if !strings.Contains(got, "dotfiles") {
+		t.Errorf("git-only project name should appear:\n%s", got)
+	}
+	if !strings.Contains(got, "fix bug") {
+		t.Errorf("commit message should appear:\n%s", got)
+	}
+	// Git-only should NOT say "Claude" or show token footnote.
 	if strings.Contains(got, "Claude") {
 		t.Errorf("git-only project should not mention Claude:\n%s", got)
+	}
+	if strings.Contains(got, "tokens") {
+		t.Errorf("git-only project should not show tokens:\n%s", got)
 	}
 }
 
@@ -124,21 +127,29 @@ func TestRenderStandup_PlainText(t *testing.T) {
 				Name:         "bigproject",
 				Interactions: 20,
 				FilesCreated: []string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go"},
+				SummaryLine:  "Built out new features",
 			},
 			"smallfix": {
 				Name:         "smallfix",
 				Interactions: 2,
+				CommitCount:  1,
+				SummaryLine:  "Minor fix",
 			},
 		},
 	}
 
 	got := RenderStandup(s, RenderOptions{})
 
-	if !strings.Contains(got, "Built out") {
-		t.Errorf("expected 'Built out' for large project:\n%s", got)
+	// Primary project appears on its own line (not as a prose bullet).
+	if !strings.Contains(got, "bigproject") {
+		t.Errorf("expected 'bigproject' in output:\n%s", got)
 	}
-	if !strings.Contains(got, "Minor work on") {
-		t.Errorf("expected 'Minor work on' for small project:\n%s", got)
+	// Minor project should appear in "Minor:" line.
+	if !strings.Contains(got, "Minor") {
+		t.Errorf("expected 'Minor' for small project:\n%s", got)
+	}
+	if !strings.Contains(got, "smallfix") {
+		t.Errorf("expected 'smallfix' in minor line:\n%s", got)
 	}
 	// No markdown bold.
 	if strings.Contains(got, "**") {
@@ -217,15 +228,5 @@ func TestPlural(t *testing.T) {
 	}
 	if got := plural(3, "file"); got != "3 files" {
 		t.Errorf("got %q", got)
-	}
-}
-
-func TestFormatCommitMessages(t *testing.T) {
-	got := formatCommitMessages([]string{"add auth", "fix bug"}, 2)
-	if !strings.Contains(got, "Committed:") {
-		t.Errorf("expected Committed prefix: %s", got)
-	}
-	if !strings.Contains(got, "add auth") {
-		t.Errorf("expected message text: %s", got)
 	}
 }
