@@ -63,13 +63,19 @@ func DefaultConfig() Config {
 	}
 }
 
-// configPath returns the path to the config file.
-func configPath() string {
+// ConfigDir returns the directory containing debrief's config file.
+// Respects XDG_CONFIG_HOME if set; otherwise ~/.config/debrief.
+func ConfigDir() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "debrief", "config.yaml")
+		return filepath.Join(xdg, "debrief")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "debrief", "config.yaml")
+	return filepath.Join(home, ".config", "debrief")
+}
+
+// configPath returns the path to the config file.
+func configPath() string {
+	return filepath.Join(ConfigDir(), "config.yaml")
 }
 
 // Load reads the config from disk, returning defaults if the file doesn't exist.
