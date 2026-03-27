@@ -14,6 +14,7 @@ import (
 	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/model"
 	"github.com/cloudprobe/debrief/internal/ui"
+	versioncheck "github.com/cloudprobe/debrief/internal/version"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -50,6 +51,14 @@ func main() {
 	root.PersistentFlags().BoolVarP(&showCost, "cost", "c", false, "show billing view with estimated API costs")
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "show debug output on stderr")
 	root.PersistentFlags().BoolVar(&noGit, "no-git", false, "skip git commit collection")
+
+	root.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
+		cacheDir := config.ConfigDir()
+		if info, ok := versioncheck.CheckForUpdate(cacheDir, version); ok {
+			fmt.Fprintf(os.Stderr, "A new version of debrief is available (%s). Upgrade: brew upgrade debrief\n", info.Latest)
+		}
+		return nil // Never propagate version check errors to the user.
+	}
 
 	root.AddCommand(yesterdayCmd())
 	root.AddCommand(weekCmd())
