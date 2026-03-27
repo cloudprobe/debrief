@@ -46,6 +46,5 @@ brews:
     license: MIT
     install: |
       bin.install "debrief"
-      generate_completions_from_executable(bin/"debrief", "completion")
     test: |
       assert_match "debrief", shell_output("#{bin}/debrief --version")
