@@ -22,7 +22,6 @@ var (
 	toDate   string
 	showCost bool
 	verbose  bool
-	detail   bool
 	noGit    bool
 )
 
@@ -46,7 +45,6 @@ func main() {
 	root.PersistentFlags().StringVarP(&toDate, "to", "t", "", "end date for range (YYYY-MM-DD)")
 	root.PersistentFlags().BoolVarP(&showCost, "cost", "c", false, "show billing view with estimated API costs")
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "show debug output on stderr")
-	root.PersistentFlags().BoolVar(&detail, "detail", false, "show per-session detail within each project")
 	root.PersistentFlags().BoolVar(&noGit, "no-git", false, "skip git commit collection")
 
 	root.AddCommand(yesterdayCmd())
@@ -151,7 +149,7 @@ func run(dr model.DateRange) error {
 		outputFormat = "text"
 	}
 
-	opts := ui.RenderOptions{ShowCost: showCost, Detail: detail}
+	opts := ui.RenderOptions{ShowCost: showCost}
 
 	singleDay := len(days) <= 1
 
