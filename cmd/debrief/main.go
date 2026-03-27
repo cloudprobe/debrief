@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,175 +22,136 @@ const argWeek = "week"
 
 var (
 	version  = "dev"
-	format   string
 	date     string
 	fromDate string
 	toDate   string
-	showCost bool
-	verbose  bool
-	noGit    bool
 )
-
-func costCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:       "cost [yesterday|week|month]",
-		Short:     "Show estimated API costs",
-		ValidArgs: []string{"yesterday", argWeek, "month"},
-		Args:      cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			showCost = true
-			if len(args) > 0 {
-				switch args[0] {
-				case "yesterday":
-					return run(yesterdayRange())
-				case argWeek:
-					return run(weekRange())
-				case "month":
-					return run(monthRange())
-				}
-			}
-			dr, err := resolveDateRange("", date, fromDate, toDate)
-			if err != nil {
-				return err
-			}
-			return run(dr)
-		},
-	}
-}
 
 func main() {
 	root := &cobra.Command{
-		Use:     "debrief",
-		Short:   "Know what you actually did today — git commits, AI sessions, one command",
-		Version: version,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			dr, err := resolveDateRange("", date, fromDate, toDate)
-			if err != nil {
-				return err
-			}
-			return run(dr)
-		},
+		Use:   "debrief",
+		Short: "Know what you actually did today — git commits, AI sessions, one command",
+		Long: `Know what you actually did today — git commits, AI sessions, one command.
+
+Run "debrief <command> -help" for information on a specific command.`,
+		// No RunE — shows help when invoked with no subcommand.
 	}
 
-	root.PersistentFlags().StringVarP(&format, "format", "o", "", "output format: text, json, standup, markdown")
+	// Suppress the default "completion" command cobra adds automatically.
+	root.CompletionOptions.DisableDefaultCmd = true
+
 	root.PersistentFlags().StringVarP(&date, "date", "d", "", "specific date (YYYY-MM-DD)")
 	root.PersistentFlags().StringVarP(&fromDate, "from", "f", "", "start date for range (YYYY-MM-DD)")
 	root.PersistentFlags().StringVarP(&toDate, "to", "t", "", "end date for range (YYYY-MM-DD)")
-	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "show debug output on stderr")
-	root.PersistentFlags().BoolVar(&noGit, "no-git", false, "skip git commit collection")
+
+	// -version flag as alias for "version" subcommand (terraform-style).
+	var showVersion bool
+	root.PersistentFlags().BoolVarP(&showVersion, "version", "", false, "An alias for the \"version\" subcommand.")
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if showVersion {
+			fmt.Printf("debrief %s\n", version)
+			os.Exit(0)
+		}
+		return nil
+	}
 
 	root.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
 		cacheDir := config.ConfigDir()
 		if info, ok := versioncheck.CheckForUpdate(cacheDir, version); ok {
-			fmt.Fprintf(os.Stderr, "A new version of debrief is available (%s). Upgrade: brew upgrade debrief\n", info.Latest)
+			fmt.Fprintf(os.Stderr, "A new version of debrief is available (%s). Upgrade: brew upgrade debrief\n", info.Latest) //nolint:errcheck
 		}
-		return nil // Never propagate version check errors to the user.
+		return nil
 	}
 
-	root.AddCommand(yesterdayCmd())
-	root.AddCommand(weekCmd())
-	root.AddCommand(monthCmd())
+	root.AddGroup(&cobra.Group{ID: "main", Title: "Available Commands:"})
+
+	root.AddCommand(initCmd())
 	root.AddCommand(standupCmd())
 	root.AddCommand(costCmd())
-	root.AddCommand(configureCmd())
-	root.AddCommand(completionCmd(root))
+	root.AddCommand(versionCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-func yesterdayCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "yesterday",
-		Short: "Show yesterday's activity summary",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(yesterdayRange())
-		},
-	}
-}
-
-func weekCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "week",
-		Short: "Show this week's activity summary",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(weekRange())
-		},
-	}
-}
-
-func monthCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "month",
-		Short: "Show this month's activity summary",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(monthRange())
-		},
-	}
-}
-
-func standupCmd() *cobra.Command {
+func initCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "standup [week]",
-		Short: "Generate copy-paste standup summary",
+		Use:     "init",
+		Short:   "Set up debrief for first use",
+		GroupID: "main",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			format = "standup"
-
-			// standup week = this week, per-day
-			if len(args) > 0 && args[0] == argWeek {
-				return run(weekRange())
-			}
-
-			dr, err := resolveDateRange("", date, fromDate, toDate)
-			if err != nil {
-				return err
-			}
-			// Default standup = today (same as base command).
-			return run(dr)
+			return runInit()
 		},
 	}
 	return cmd
 }
 
-func completionCmd(root *cobra.Command) *cobra.Command {
-	return &cobra.Command{
-		Use:   "completion <shell>",
-		Short: "Generate shell completion script (bash, zsh, fish)",
-		Long: `Output a shell completion script to stdout.
-
-Bash:   source <(debrief completion bash)
-Zsh:    debrief completion zsh > "${fpath[1]}/_debrief"
-Fish:   debrief completion fish | source`,
-		Args:      cobra.ExactArgs(1),
-		ValidArgs: []string{"bash", "zsh", "fish"},
+func standupCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:       "standup [yesterday|week]",
+		Short:     "Generate a copy-paste standup summary",
+		GroupID:   "main",
+		ValidArgs: []string{"yesterday", argWeek},
+		Args:      cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			switch args[0] {
-			case "bash":
-				return root.GenBashCompletion(os.Stdout)
-			case "zsh":
-				return root.GenZshCompletion(os.Stdout)
-			case "fish":
-				return root.GenFishCompletion(os.Stdout, true)
-			default:
-				return fmt.Errorf("unsupported shell %q — supported: bash, zsh, fish", args[0])
+			if len(args) > 0 {
+				switch args[0] {
+				case "yesterday":
+					return runStandup(yesterdayRange())
+				case argWeek:
+					return runStandup(weekRange())
+				}
 			}
+			dr, err := resolveDateRange(date, fromDate, toDate)
+			if err != nil {
+				return err
+			}
+			return runStandup(dr)
 		},
 	}
+	return cmd
 }
 
-func configureCmd() *cobra.Command {
+func costCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "configure",
-		Short: "Set up debrief for first use",
+		Use:       "cost [yesterday|week|month]",
+		Short:     "Show estimated API costs",
+		GroupID:   "main",
+		ValidArgs: []string{"yesterday", argWeek, "month"},
+		Args:      cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConfigure()
+			if len(args) > 0 {
+				switch args[0] {
+				case "yesterday":
+					return runCost(yesterdayRange())
+				case argWeek:
+					return runCost(weekRange())
+				case "month":
+					return runCost(monthRange())
+				}
+			}
+			dr, err := resolveDateRange(date, fromDate, toDate)
+			if err != nil {
+				return err
+			}
+			return runCost(dr)
 		},
 	}
 }
 
-func runConfigure() error {
-	// Load existing config so we can show current preset as default.
+func versionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "version",
+		Short:   "Show the current debrief version",
+		GroupID: "main",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("debrief %s\n", version)
+		},
+	}
+}
+
+func runInit() error {
 	existing := config.Load()
 
 	currentPreset := existing.Pricing.Preset
@@ -216,23 +176,16 @@ func runConfigure() error {
 		input = currentPreset
 	}
 
-	// Accept numeric shortcut (1-4) as shown in the menu.
 	numericPresets := map[string]string{"1": "direct", "2": "max", "3": "vertex", "4": "bedrock"}
 	if name, ok := numericPresets[input]; ok {
 		input = name
 	}
 
-	validPresets := map[string]bool{
-		"direct":  true,
-		"max":     true,
-		"vertex":  true,
-		"bedrock": true,
-	}
+	validPresets := map[string]bool{"direct": true, "max": true, "vertex": true, "bedrock": true}
 	if !validPresets[input] {
 		return fmt.Errorf("unknown preset %q — choose: direct, max, vertex, bedrock", input)
 	}
 
-	// Write updated config. Preserve all existing fields, update only Pricing.Preset.
 	existing.Pricing.Preset = input
 
 	dir := config.ConfigDir()
@@ -251,146 +204,89 @@ func runConfigure() error {
 	}
 
 	fmt.Printf("Configuration saved to %s\n", cfgFile)
-	fmt.Println("Run `debrief` to see today's summary.")
+	fmt.Println("Run `debrief standup` to see today's summary.")
 	return nil
 }
 
-func run(dr model.DateRange) error {
+func runStandup(dr model.DateRange) error {
+	cfg := config.Load()
+	allActivities := collectActivities(cfg, dr, false)
+	days := splitByDay(allActivities, dr)
+	opts := ui.RenderOptions{}
+	for i, day := range days {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Print(ui.RenderStandup(day, opts))
+	}
+	return nil
+}
+
+func runCost(dr model.DateRange) error {
 	cfg := config.Load()
 
-	collectors := buildCollectors(cfg)
+	preset := cfg.Pricing.Preset
+	if preset == "" {
+		fmt.Println("Cost view requires setup. Run `debrief init` to get started.")
+		return nil
+	}
+	if preset == "max" {
+		fmt.Println("You're on a Max/Pro subscription — per-token costs don't apply.")
+		fmt.Println("Run `debrief standup` to see your activity summary.")
+		return nil
+	}
 
-	var allActivities []model.Activity
+	allActivities := collectActivities(cfg, dr, true)
+	days := splitByDay(allActivities, dr)
+	opts := ui.RenderOptions{ShowCost: true}
+	for _, day := range days {
+		fmt.Print(ui.RenderCost(day, opts))
+	}
+	costSummary := buildCostSummary(cfg, allActivities, dr)
+	fmt.Print(ui.RenderCostFooter(costSummary))
+	return nil
+}
+
+func collectActivities(cfg config.Config, dr model.DateRange, costMode bool) []model.Activity {
+	collectors := []collector.Collector{
+		collector.NewClaudeCollector(cfg.ClaudeDir, costMode, cfg.Pricing),
+		collector.NewGitCollector(cfg.GitRepoPaths, cfg.GitDiscoveryDepth),
+	}
+	var all []model.Activity
 	for _, c := range collectors {
 		if !c.Available() {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "[debrief] skipping %s: not available\n", c.Name())
-			}
 			continue
-		}
-		if verbose {
-			fmt.Fprintf(os.Stderr, "[debrief] collecting from %s...\n", c.Name())
 		}
 		activities, err := c.Collect(dr)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", c.Name(), err)
+			fmt.Fprintf(os.Stderr, "warning: %s: %v\n", c.Name(), err) //nolint:errcheck
 			continue
 		}
-		if verbose {
-			fmt.Fprintf(os.Stderr, "[debrief] %s: %d activities found\n", c.Name(), len(activities))
-		}
-		allActivities = append(allActivities, activities...)
+		all = append(all, activities...)
 	}
-
-	// For multi-day ranges, split into per-day summaries.
-	days := splitByDay(allActivities, dr)
-
-	// Resolve format: flag > config > default.
-	outputFormat := format
-	if outputFormat == "" {
-		outputFormat = cfg.DefaultFormat
-	}
-	if outputFormat == "" {
-		outputFormat = "text"
-	}
-
-	opts := ui.RenderOptions{ShowCost: showCost}
-
-	singleDay := len(days) <= 1
-
-	switch outputFormat {
-	case "json":
-		summary := aggregator.Aggregate(allActivities)
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(summary)
-
-	case "standup":
-		for i, day := range days {
-			if i > 0 {
-				fmt.Println()
-			}
-			fmt.Print(ui.RenderStandup(day, opts))
-		}
-
-	case "markdown":
-		for i, day := range days {
-			if i > 0 {
-				fmt.Println()
-			}
-			fmt.Print(ui.RenderMarkdown(day, opts))
-		}
-
-	default:
-		// Cost gate: preset must be explicitly configured (per D-07, D-08, D-13, D-14).
-		// Scoped inside default: branch — standup and markdown ignore --cost and never reach this.
-		if showCost {
-			preset := cfg.Pricing.Preset
-			if preset == "" {
-				fmt.Println("Cost view requires setup. Run `debrief configure` to get started.")
-				return nil
-			}
-			if preset == "max" {
-				fmt.Println("You're on a Max/Pro subscription — per-token costs don't apply.")
-				fmt.Println("Use `debrief` to see your activity summary.")
-				return nil
-			}
-		}
-		if showCost {
-			for _, day := range days {
-				fmt.Print(ui.RenderCost(day, opts))
-			}
-			costSummary := buildCostSummary(cfg, allActivities, dr)
-			fmt.Print(ui.RenderCostFooter(costSummary))
-		} else {
-			for i, day := range days {
-				if i > 0 {
-					fmt.Println()
-				}
-				renderOpts := opts
-				renderOpts.SingleDay = singleDay
-				fmt.Print(ui.RenderText(day, renderOpts))
-			}
-		}
-	}
-
-	return nil
+	return all
 }
 
-func buildCollectors(cfg config.Config) []collector.Collector {
-	var collectors []collector.Collector
-	collectors = append(collectors, collector.NewClaudeCollector(cfg.ClaudeDir, showCost, cfg.Pricing))
-	if !noGit {
-		collectors = append(collectors, collector.NewGitCollector(cfg.GitRepoPaths, cfg.GitDiscoveryDepth))
-	}
-	return collectors
-}
-
-// buildCostSummary builds cost summary, reusing already-collected activities
-// and only fetching wider ranges when the current range doesn't cover them.
 func buildCostSummary(cfg config.Config, currentActivities []model.Activity, currentDR model.DateRange) ui.CostSummary {
 	currentSummary := aggregator.Aggregate(currentActivities)
 
 	wr := weekRange()
 	mr := monthRange()
 
-	// If current range covers week, reuse. Otherwise collect.
 	var weekSummary model.DaySummary
 	if !currentDR.Start.After(wr.Start) && !currentDR.End.Before(wr.End) {
 		weekSummary = currentSummary
 	} else {
-		weekSummary = aggregator.Aggregate(collectCostActivities(cfg, wr))
+		weekSummary = aggregator.Aggregate(collectActivities(cfg, wr, true))
 	}
 
-	// If current range covers month, reuse. Otherwise collect.
 	var monthSummary model.DaySummary
 	if !currentDR.Start.After(mr.Start) && !currentDR.End.Before(mr.End) {
 		monthSummary = currentSummary
 	} else {
-		monthSummary = aggregator.Aggregate(collectCostActivities(cfg, mr))
+		monthSummary = aggregator.Aggregate(collectActivities(cfg, mr, true))
 	}
 
-	// Determine period label based on range.
 	periodLabel := "Today"
 	days := int(currentDR.End.Sub(currentDR.Start).Hours() / 24)
 	if days > 20 {
@@ -409,31 +305,17 @@ func buildCostSummary(cfg config.Config, currentActivities []model.Activity, cur
 	}
 }
 
-// collectCostActivities runs Claude collector for a date range and returns activities.
-func collectCostActivities(cfg config.Config, dr model.DateRange) []model.Activity {
-	c := collector.NewClaudeCollector(cfg.ClaudeDir, true, cfg.Pricing)
-	if !c.Available() {
-		return nil
-	}
-	activities, _ := c.Collect(dr)
-	return activities
-}
-
-// splitByDay groups activities into per-day summaries.
 func splitByDay(activities []model.Activity, dr model.DateRange) []model.DaySummary {
-	// Group by calendar day.
 	byDay := make(map[string][]model.Activity)
 	for _, a := range activities {
 		day := a.Timestamp.Format("2006-01-02")
 		byDay[day] = append(byDay[day], a)
 	}
 
-	// If only one day or empty, return a single summary.
 	if len(byDay) <= 1 {
 		return []model.DaySummary{aggregator.Aggregate(activities)}
 	}
 
-	// Generate one summary per day in the range.
 	var days []model.DaySummary
 	for d := dr.Start; d.Before(dr.End); d = d.Add(24 * time.Hour) {
 		key := d.Format("2006-01-02")
@@ -444,17 +326,12 @@ func splitByDay(activities []model.Activity, dr model.DateRange) []model.DaySumm
 	return days
 }
 
-// resolveDateRange resolves flags into a DateRange.
-// Priority: --from/--to > --date > default (today).
-func resolveDateRange(arg, dateFlag, from, to string) (model.DateRange, error) {
+func resolveDateRange(dateFlag, from, to string) (model.DateRange, error) {
 	if from != "" || to != "" {
 		return parseFromTo(from, to)
 	}
 	if dateFlag != "" {
 		return parseSingleDate(dateFlag)
-	}
-	if arg == argWeek {
-		return weekRange(), nil
 	}
 	return todayRange(), nil
 }
@@ -469,7 +346,8 @@ func parseFromTo(from, to string) (model.DateRange, error) {
 			return model.DateRange{}, fmt.Errorf("invalid --from date %q, expected YYYY-MM-DD: %w", from, err)
 		}
 	} else {
-		start = time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.Now().Location())
+		now := time.Now()
+		start = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	}
 
 	if to != "" {
@@ -477,7 +355,7 @@ func parseFromTo(from, to string) (model.DateRange, error) {
 		if err != nil {
 			return model.DateRange{}, fmt.Errorf("invalid --to date %q, expected YYYY-MM-DD: %w", to, err)
 		}
-		end = end.Add(24 * time.Hour) // Include the end date fully.
+		end = end.Add(24 * time.Hour)
 	} else {
 		end = start.Add(24 * time.Hour)
 	}
@@ -490,24 +368,19 @@ func parseSingleDate(dateStr string) (model.DateRange, error) {
 	if err != nil {
 		return model.DateRange{}, fmt.Errorf("invalid date %q, expected YYYY-MM-DD: %w", dateStr, err)
 	}
-	return model.DateRange{
-		Start: t,
-		End:   t.Add(24 * time.Hour),
-	}, nil
+	return model.DateRange{Start: t, End: t.Add(24 * time.Hour)}, nil
 }
 
 func todayRange() model.DateRange {
 	now := time.Now()
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	end := start.Add(24 * time.Hour)
-	return model.DateRange{Start: start, End: end}
+	return model.DateRange{Start: start, End: start.Add(24 * time.Hour)}
 }
 
 func yesterdayRange() model.DateRange {
 	now := time.Now()
 	end := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	start := end.Add(-24 * time.Hour)
-	return model.DateRange{Start: start, End: end}
+	return model.DateRange{Start: end.Add(-24 * time.Hour), End: end}
 }
 
 func weekRange() model.DateRange {
