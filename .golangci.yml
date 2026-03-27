@@ -1,0 +1,19 @@
+linters:
+  enable:
+    - errcheck
+    - gocritic
+    - gofmt
+    - gosec
+    - goconst
+    - unparam
+    - bodyclose
+    - misspell
+
+linters-settings:
+  gosec:
+    excludes:
+      - G304  # file path as taint input — acceptable for a CLI reading local files
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
