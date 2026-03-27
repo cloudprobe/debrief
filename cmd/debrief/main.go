@@ -202,7 +202,7 @@ func run(dr model.DateRange) error {
 
 func buildCollectors(cfg config.Config) []collector.Collector {
 	var collectors []collector.Collector
-	collectors = append(collectors, collector.NewClaudeCollector(cfg.ClaudeDir, showCost))
+	collectors = append(collectors, collector.NewClaudeCollector(cfg.ClaudeDir, showCost, cfg.Pricing))
 	if !noGit {
 		collectors = append(collectors, collector.NewGitCollector(cfg.GitRepoPaths, cfg.GitDiscoveryDepth))
 	}
@@ -254,7 +254,7 @@ func buildCostSummary(cfg config.Config, currentActivities []model.Activity, cur
 
 // collectCostActivities runs Claude collector for a date range and returns activities.
 func collectCostActivities(cfg config.Config, dr model.DateRange) []model.Activity {
-	c := collector.NewClaudeCollector(cfg.ClaudeDir, true)
+	c := collector.NewClaudeCollector(cfg.ClaudeDir, true, cfg.Pricing)
 	if !c.Available() {
 		return nil
 	}

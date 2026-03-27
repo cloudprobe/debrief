@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/model"
 )
 
@@ -57,16 +58,17 @@ type claudeUserMsg struct {
 
 // ClaudeCollector reads Claude Code JSONL session files.
 type ClaudeCollector struct {
-	homeDir  string
-	showCost bool
+	homeDir    string
+	showCost   bool
+	pricingCfg config.PricingConfig
 }
 
 // NewClaudeCollector creates a new ClaudeCollector.
-func NewClaudeCollector(homeDir string, showCost bool) *ClaudeCollector {
+func NewClaudeCollector(homeDir string, showCost bool, pricingCfg config.PricingConfig) *ClaudeCollector {
 	if homeDir == "" {
 		homeDir, _ = os.UserHomeDir()
 	}
-	return &ClaudeCollector{homeDir: homeDir, showCost: showCost}
+	return &ClaudeCollector{homeDir: homeDir, showCost: showCost, pricingCfg: pricingCfg}
 }
 
 func (c *ClaudeCollector) Name() string { return "claude-code" }
@@ -204,6 +206,8 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 	}
 	defer func() { _ = f.Close() }()
 
+	pricingTable := EffectivePricing(c.pricingCfg)
+
 	// Key: "sessionID:project" → accumulator
 	accums := make(map[string]*projectAccum)
 
@@ -326,7 +330,11 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 		primaryModel := topKey(pa.models)
 		var cost float64
 		if c.showCost {
-			cost = CalculateCost(primaryModel, pa.tokensIn, pa.tokensOut, pa.cacheRead, pa.cacheWrite)
+			var costKnown bool
+			cost, costKnown = CalculateCost(pricingTable, primaryModel, pa.tokensIn, pa.tokensOut, pa.cacheRead, pa.cacheWrite)
+			if !costKnown {
+				cost = -1.0 // sentinel: unknown price
+			}
 		}
 
 		// Resolve session title: custom-title > last-prompt > empty.

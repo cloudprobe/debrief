@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/model"
 )
 
@@ -17,7 +18,7 @@ func TestClaudeCollector_ParseSampleFile(t *testing.T) {
 	}
 	testdataDir := filepath.Join(wd, "..", "..", "testdata")
 
-	c := &ClaudeCollector{homeDir: "", showCost: true}
+	c := &ClaudeCollector{homeDir: "", showCost: true, pricingCfg: config.PricingConfig{}}
 	dr := model.DateRange{
 		Start: time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 3, 26, 0, 0, 0, 0, time.UTC),
@@ -153,6 +154,7 @@ func TestCalculateCost(t *testing.T) {
 		cacheRead  int
 		cacheWrite int
 		wantCost   float64
+		wantKnown  bool
 	}{
 		{
 			name:       "opus basic",
@@ -162,6 +164,7 @@ func TestCalculateCost(t *testing.T) {
 			cacheRead:  0,
 			cacheWrite: 0,
 			wantCost:   (1000.0*5 + 500.0*25) / 1_000_000,
+			wantKnown:  true,
 		},
 		{
 			name:       "sonnet with cache",
@@ -173,7 +176,8 @@ func TestCalculateCost(t *testing.T) {
 			// input: 1000 * 3/1M = 0.003, output: 500 * 15/1M = 0.0075
 			// cache read: 200 * 3 * 0.10 / 1M = 0.00006
 			// cache write: 100 * 3 * 1.25 / 1M = 0.000375
-			wantCost: 0.003 + 0.0075 + 0.00006 + 0.000375,
+			wantCost:  0.003 + 0.0075 + 0.00006 + 0.000375,
+			wantKnown: true,
 		},
 		{
 			name:      "unknown model",
@@ -181,12 +185,17 @@ func TestCalculateCost(t *testing.T) {
 			tokensIn:  1000,
 			tokensOut: 500,
 			wantCost:  0,
+			wantKnown: false,
 		},
 	}
 
+	table := directTable()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := CalculateCost(tt.model, tt.tokensIn, tt.tokensOut, tt.cacheRead, tt.cacheWrite)
+			got, known := CalculateCost(table, tt.model, tt.tokensIn, tt.tokensOut, tt.cacheRead, tt.cacheWrite)
+			if known != tt.wantKnown {
+				t.Errorf("CalculateCost known = %v, want %v", known, tt.wantKnown)
+			}
 			if math.Abs(got-tt.wantCost) > 0.000001 {
 				t.Errorf("CalculateCost = %f, want %f", got, tt.wantCost)
 			}

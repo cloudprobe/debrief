@@ -27,14 +27,18 @@ func Aggregate(activities []model.Activity) model.DaySummary {
 	summary.Activities = activities
 
 	for _, a := range activities {
-		summary.TotalCost += a.CostUSD
+		if a.CostUSD >= 0 {
+			summary.TotalCost += a.CostUSD
+		}
 		summary.TotalTokens += a.TokensIn + a.TokensOut
 		summary.Interactions += a.Interactions
 
 		// By project.
 		p := summary.ByProject[a.Project]
 		p.Name = a.Project
-		p.TotalCost += a.CostUSD
+		if a.CostUSD >= 0 {
+			p.TotalCost += a.CostUSD
+		}
 		p.TotalTokens += a.TokensIn + a.TokensOut
 		p.Interactions += a.Interactions
 		p.CommitCount += a.CommitCount
@@ -58,7 +62,9 @@ func Aggregate(activities []model.Activity) model.DaySummary {
 			m.Name = a.Model
 			m.TokensIn += a.TokensIn
 			m.TokensOut += a.TokensOut
-			m.TotalCost += a.CostUSD
+			if a.CostUSD >= 0 {
+				m.TotalCost += a.CostUSD
+			}
 			m.CallCount++
 			summary.ByModel[a.Model] = m
 		}

@@ -67,8 +67,8 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 					title = "(untitled)"
 				}
 				modelName := shortModelName(s.Model)
-				line := fmt.Sprintf("    \"%s\"  %s  %s  $%.2f",
-					title, modelName, plural(s.Interactions, "msg"), s.CostUSD)
+				line := fmt.Sprintf("    \"%s\"  %s  %s  %s",
+					title, modelName, plural(s.Interactions, "msg"), formatCost(s.CostUSD))
 				fmt.Fprintf(&b, "%s\n", line)
 			}
 		}
@@ -169,7 +169,7 @@ func RenderCost(summary model.DaySummary, opts RenderOptions) string {
 		if p.TotalCost <= 0 {
 			continue
 		}
-		fmt.Fprintf(&b, "  %-40s $%.2f\n", p.Name, p.TotalCost)
+		fmt.Fprintf(&b, "  %-40s %s\n", p.Name, formatCost(p.TotalCost))
 
 		// Models under each project.
 		type modelCost struct {
@@ -178,7 +178,7 @@ func RenderCost(summary model.DaySummary, opts RenderOptions) string {
 		}
 		var models []modelCost
 		for _, a := range summary.Activities {
-			if a.Project == p.Name && a.CostUSD > 0 {
+			if a.Project == p.Name && a.CostUSD != 0 {
 				models = append(models, modelCost{name: shortModelName(a.Model), cost: a.CostUSD})
 			}
 		}
@@ -193,7 +193,7 @@ func RenderCost(summary model.DaySummary, opts RenderOptions) string {
 		}
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i].cost > sorted[j].cost })
 		for _, m := range sorted {
-			fmt.Fprintf(&b, "    %-26s $%.2f\n", m.name, m.cost)
+			fmt.Fprintf(&b, "    %-26s %s\n", m.name, formatCost(m.cost))
 		}
 		b.WriteString("\n")
 	}
@@ -518,6 +518,14 @@ func shortModelName(model string) string {
 	}
 
 	return model
+}
+
+// formatCost formats a cost value, returning an em-dash for unknown (negative) costs.
+func formatCost(c float64) string {
+	if c < 0 {
+		return "\u2014"
+	}
+	return fmt.Sprintf("$%.2f", c)
 }
 
 func plural(n int, word string) string {
