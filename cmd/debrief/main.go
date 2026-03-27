@@ -19,6 +19,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const argWeek = "week"
+
 var (
 	version  = "dev"
 	format   string
@@ -29,6 +31,33 @@ var (
 	verbose  bool
 	noGit    bool
 )
+
+func costCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:       "cost [yesterday|week|month]",
+		Short:     "Show estimated API costs",
+		ValidArgs: []string{"yesterday", argWeek, "month"},
+		Args:      cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			showCost = true
+			if len(args) > 0 {
+				switch args[0] {
+				case "yesterday":
+					return run(yesterdayRange())
+				case argWeek:
+					return run(weekRange())
+				case "month":
+					return run(monthRange())
+				}
+			}
+			dr, err := resolveDateRange("", date, fromDate, toDate)
+			if err != nil {
+				return err
+			}
+			return run(dr)
+		},
+	}
+}
 
 func main() {
 	root := &cobra.Command{
@@ -48,7 +77,6 @@ func main() {
 	root.PersistentFlags().StringVarP(&date, "date", "d", "", "specific date (YYYY-MM-DD)")
 	root.PersistentFlags().StringVarP(&fromDate, "from", "f", "", "start date for range (YYYY-MM-DD)")
 	root.PersistentFlags().StringVarP(&toDate, "to", "t", "", "end date for range (YYYY-MM-DD)")
-	root.PersistentFlags().BoolVarP(&showCost, "cost", "c", false, "show billing view with estimated API costs")
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "show debug output on stderr")
 	root.PersistentFlags().BoolVar(&noGit, "no-git", false, "skip git commit collection")
 
@@ -64,6 +92,7 @@ func main() {
 	root.AddCommand(weekCmd())
 	root.AddCommand(monthCmd())
 	root.AddCommand(standupCmd())
+	root.AddCommand(costCmd())
 	root.AddCommand(configureCmd())
 	root.AddCommand(completionCmd(root))
 
@@ -110,7 +139,7 @@ func standupCmd() *cobra.Command {
 			format = "standup"
 
 			// standup week = this week, per-day
-			if len(args) > 0 && args[0] == "week" {
+			if len(args) > 0 && args[0] == argWeek {
 				return run(weekRange())
 			}
 
@@ -424,7 +453,7 @@ func resolveDateRange(arg, dateFlag, from, to string) (model.DateRange, error) {
 	if dateFlag != "" {
 		return parseSingleDate(dateFlag)
 	}
-	if arg == "week" {
+	if arg == argWeek {
 		return weekRange(), nil
 	}
 	return todayRange(), nil
