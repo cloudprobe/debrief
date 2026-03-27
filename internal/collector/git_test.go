@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,8 +105,8 @@ func TestGitCollector_DiscoverRepos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	g := &GitCollector{scanPaths: []string{dir}}
-	repos := g.discoverRepos()
+	g := &GitCollector{scanPaths: []string{dir}, maxDepth: 2}
+	repos := g.discoverRepos(&bytes.Buffer{})
 
 	if len(repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d: %v", len(repos), repos)

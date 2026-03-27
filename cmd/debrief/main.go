@@ -204,7 +204,7 @@ func buildCollectors(cfg config.Config) []collector.Collector {
 	var collectors []collector.Collector
 	collectors = append(collectors, collector.NewClaudeCollector(cfg.ClaudeDir, showCost))
 	if !noGit {
-		collectors = append(collectors, collector.NewGitCollector(cfg.GitRepoPaths))
+		collectors = append(collectors, collector.NewGitCollector(cfg.GitRepoPaths, cfg.GitDiscoveryDepth))
 	}
 	return collectors
 }

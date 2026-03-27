@@ -2,6 +2,8 @@ package collector
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,12 +17,16 @@ import (
 // GitCollector discovers git repos and extracts commit activity.
 type GitCollector struct {
 	scanPaths []string
+	maxDepth  int
 	author    string // filter by author email or name; empty = current user
 }
 
 // NewGitCollector creates a GitCollector that scans the given directories.
-func NewGitCollector(scanPaths []string) *GitCollector {
-	return &GitCollector{scanPaths: scanPaths}
+func NewGitCollector(scanPaths []string, maxDepth int) *GitCollector {
+	if maxDepth <= 0 {
+		maxDepth = 2
+	}
+	return &GitCollector{scanPaths: scanPaths, maxDepth: maxDepth}
 }
 
 func (g *GitCollector) Name() string { return "git" }
@@ -31,7 +37,7 @@ func (g *GitCollector) Available() bool {
 }
 
 func (g *GitCollector) Collect(dr model.DateRange) ([]model.Activity, error) {
-	repos := g.discoverRepos()
+	repos := g.discoverRepos(os.Stderr)
 	author := g.resolveAuthor()
 
 	var all []model.Activity
@@ -48,35 +54,53 @@ func (g *GitCollector) Collect(dr model.DateRange) ([]model.Activity, error) {
 }
 
 // discoverRepos finds git repositories under the configured scan paths.
-// It looks one level deep (direct children that contain .git).
-func (g *GitCollector) discoverRepos() []string {
+// It scans up to g.maxDepth directory levels deep, writing warnings to w.
+func (g *GitCollector) discoverRepos(w io.Writer) []string {
 	seen := make(map[string]bool)
 	var repos []string
 
 	for _, scanPath := range g.scanPaths {
-		entries, err := os.ReadDir(scanPath)
-		if err != nil {
+		before := len(repos)
+		if _, err := os.Stat(scanPath); os.IsNotExist(err) {
+			fmt.Fprintf(w, "warning: git scan path does not exist: %s\n", scanPath)
 			continue
 		}
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			dir := filepath.Join(scanPath, e.Name())
-			gitDir := filepath.Join(dir, ".git")
-			if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
-				real, err := filepath.EvalSymlinks(dir)
-				if err != nil {
-					real = dir
-				}
-				if !seen[real] {
-					seen[real] = true
-					repos = append(repos, dir)
-				}
-			}
+		g.scanDir(scanPath, 0, seen, &repos)
+		if len(repos) == before {
+			fmt.Fprintf(w, "warning: no git repos found under: %s\n", scanPath)
 		}
 	}
 	return repos
+}
+
+// scanDir recursively walks dir up to g.maxDepth levels, collecting git repos.
+func (g *GitCollector) scanDir(dir string, depth int, seen map[string]bool, repos *[]string) {
+	if depth >= g.maxDepth {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		subdir := filepath.Join(dir, e.Name())
+		gitDir := filepath.Join(subdir, ".git")
+		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+			real, err := filepath.EvalSymlinks(subdir)
+			if err != nil {
+				real = subdir
+			}
+			if !seen[real] {
+				seen[real] = true
+				*repos = append(*repos, subdir)
+			}
+			continue // do not recurse into repos
+		}
+		g.scanDir(subdir, depth+1, seen, repos)
+	}
 }
 
 // resolveAuthor returns the git user email for filtering commits.

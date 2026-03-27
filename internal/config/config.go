@@ -12,6 +12,10 @@ type Config struct {
 	// GitRepoPaths are directories to scan for git repos.
 	GitRepoPaths []string `yaml:"git_repo_paths"`
 
+	// GitDiscoveryDepth controls how many directory levels deep to scan for git repos.
+	// Default is 2.
+	GitDiscoveryDepth int `yaml:"git_discovery_depth,omitempty"`
+
 	// ClaudeDir overrides the default ~/.claude/projects/ path.
 	ClaudeDir string `yaml:"claude_dir,omitempty"`
 
@@ -34,7 +38,8 @@ func DefaultConfig() Config {
 			filepath.Join(home, "projects"),
 			filepath.Join(home, "code"),
 		},
-		DefaultFormat: "text",
+		GitDiscoveryDepth: 2,
+		DefaultFormat:     "text",
 	}
 }
 
