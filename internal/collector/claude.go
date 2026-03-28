@@ -115,6 +115,15 @@ func findJSONLFiles(baseDir string) ([]string, error) {
 	return files, err
 }
 
+// modelUsage tracks token counts for a single model within a session.
+type modelUsage struct {
+	calls      int
+	tokensIn   int
+	tokensOut  int
+	cacheRead  int
+	cacheWrite int
+}
+
 // projectAccum accumulates data for one project within a session.
 type projectAccum struct {
 	project       string
@@ -124,14 +133,10 @@ type projectAccum struct {
 	firstSeen     time.Time
 	lastSeen      time.Time
 	interactions  int
-	tokensIn      int
-	tokensOut     int
-	cacheRead     int
-	cacheWrite    int
-	models        map[string]int  // model → API call count
-	tools         map[string]int  // tool name → call count
-	filesCreated  map[string]bool // unique file paths
-	filesModified map[string]bool // unique file paths
+	byModel       map[string]*modelUsage // model → per-model token counts
+	tools         map[string]int         // tool name → call count
+	filesCreated  map[string]bool        // unique file paths
+	filesModified map[string]bool        // unique file paths
 }
 
 func newProjectAccum(project, cwd, branch, sessionID string, ts time.Time) *projectAccum {
@@ -142,7 +147,7 @@ func newProjectAccum(project, cwd, branch, sessionID string, ts time.Time) *proj
 		sessionID:     sessionID,
 		firstSeen:     ts,
 		lastSeen:      ts,
-		models:        make(map[string]int),
+		byModel:       make(map[string]*modelUsage),
 		tools:         make(map[string]int),
 		filesCreated:  make(map[string]bool),
 		filesModified: make(map[string]bool),
@@ -269,11 +274,16 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 		}
 
 		if msg.Usage != nil && msg.Model != "" {
-			pa.models[msg.Model]++
-			pa.tokensIn += msg.Usage.InputTokens
-			pa.tokensOut += msg.Usage.OutputTokens
-			pa.cacheRead += msg.Usage.CacheReadInputTokens
-			pa.cacheWrite += msg.Usage.CacheCreationInputTokens
+			mu := pa.byModel[msg.Model]
+			if mu == nil {
+				mu = &modelUsage{}
+				pa.byModel[msg.Model] = mu
+			}
+			mu.calls++
+			mu.tokensIn += msg.Usage.InputTokens
+			mu.tokensOut += msg.Usage.OutputTokens
+			mu.cacheRead += msg.Usage.CacheReadInputTokens
+			mu.cacheWrite += msg.Usage.CacheCreationInputTokens
 		}
 
 		for _, block := range msg.Content {
@@ -297,16 +307,34 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 
 	var activities []model.Activity
 	for _, pa := range accums {
-		if pa.interactions == 0 && pa.tokensIn == 0 {
+		// Sum tokens across all models for display fields.
+		var totalIn, totalOut, totalCacheRead, totalCacheWrite int
+		modelCalls := make(map[string]int, len(pa.byModel))
+		for m, mu := range pa.byModel {
+			totalIn += mu.tokensIn
+			totalOut += mu.tokensOut
+			totalCacheRead += mu.cacheRead
+			totalCacheWrite += mu.cacheWrite
+			modelCalls[m] = mu.calls
+		}
+
+		if pa.interactions == 0 && totalIn == 0 {
 			continue
 		}
 
-		primaryModel := topKey(pa.models)
+		// Calculate cost per model and sum — avoids applying one model's rate to
+		// another model's tokens when a session mixes e.g. opus and sonnet.
 		var cost float64
 		if c.showCost {
-			var costKnown bool
-			cost, costKnown = CalculateCost(pricingTable, primaryModel, pa.tokensIn, pa.tokensOut, pa.cacheRead, pa.cacheWrite)
-			if !costKnown {
+			var anyCostKnown bool
+			for m, mu := range pa.byModel {
+				c2, known := CalculateCost(pricingTable, m, mu.tokensIn, mu.tokensOut, mu.cacheRead, mu.cacheWrite)
+				if known {
+					cost += c2
+					anyCostKnown = true
+				}
+			}
+			if !anyCostKnown {
 				cost = -1.0 // sentinel: unknown price
 			}
 		}
@@ -317,11 +345,11 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			EndTime:       pa.lastSeen,
 			Project:       pa.project,
 			Branch:        pa.branch,
-			Model:         primaryModel,
-			TokensIn:      pa.tokensIn,
-			TokensOut:     pa.tokensOut,
-			CacheRead:     pa.cacheRead,
-			CacheWrite:    pa.cacheWrite,
+			Model:         topKey(modelCalls),
+			TokensIn:      totalIn,
+			TokensOut:     totalOut,
+			CacheRead:     totalCacheRead,
+			CacheWrite:    totalCacheWrite,
 			CostUSD:       cost,
 			Interactions:  pa.interactions,
 			FilesCreated:  setToSlice(pa.filesCreated),
