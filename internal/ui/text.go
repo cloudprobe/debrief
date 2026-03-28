@@ -328,14 +328,6 @@ func shortModelName(model string) string {
 	return model
 }
 
-// formatCost formats a cost value, returning an em-dash for unknown (negative) costs.
-func formatCost(c float64) string {
-	if c < 0 {
-		return "\u2014"
-	}
-	return fmt.Sprintf("$%.2f", c)
-}
-
 func plural(n int, word string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, word)
