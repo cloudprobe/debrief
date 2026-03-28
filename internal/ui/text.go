@@ -52,11 +52,7 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 			fmt.Fprintf(&b, "    %s\n", p.SummaryLine)
 		}
 		// Commit bullets.
-		for i, msg := range p.CommitMessages {
-			if i >= 3 {
-				fmt.Fprintf(&b, "    \u2022 +%d more\n", len(p.CommitMessages)-3)
-				break
-			}
+		for _, msg := range p.CommitMessages {
 			fmt.Fprintf(&b, "    \u2022 %s\n", msg)
 		}
 		totalCommits += p.CommitCount
@@ -94,39 +90,18 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 
 	projects := sortedProjects(summary.ByProject)
 
-	var primary, minor []model.ProjectSummary
 	for _, p := range projects {
 		if p.SummaryLine == "" && p.CommitCount == 0 {
 			continue
 		}
-		if p.CommitCount >= 2 || len(p.FilesCreated)+len(p.FilesModified) >= 3 || p.Interactions >= 5 {
-			primary = append(primary, p)
-		} else {
-			minor = append(minor, p)
-		}
-	}
-
-	for _, p := range primary {
 		fmt.Fprintf(&b, "%s\n", p.Name)
 		if p.SummaryLine != "" {
 			fmt.Fprintf(&b, "  %s\n", p.SummaryLine)
 		}
-		for i, msg := range p.CommitMessages {
-			if i >= 3 {
-				fmt.Fprintf(&b, "  \u2022 +%d more\n", len(p.CommitMessages)-3)
-				break
-			}
+		for _, msg := range p.CommitMessages {
 			fmt.Fprintf(&b, "  \u2022 %s\n", msg)
 		}
 		b.WriteString("\n")
-	}
-
-	if len(minor) > 0 {
-		var names []string
-		for _, p := range minor {
-			names = append(names, p.Name)
-		}
-		fmt.Fprintf(&b, "Minor: %s\n", strings.Join(names, ", "))
 	}
 
 	return b.String()
@@ -250,11 +225,7 @@ func RenderMarkdown(summary model.DaySummary, opts RenderOptions) string {
 		if p.SummaryLine != "" {
 			fmt.Fprintf(&b, "%s\n\n", p.SummaryLine)
 		}
-		for i, msg := range p.CommitMessages {
-			if i >= 3 {
-				fmt.Fprintf(&b, "- +%d more\n", len(p.CommitMessages)-3)
-				break
-			}
+		for _, msg := range p.CommitMessages {
 			fmt.Fprintf(&b, "- %s\n", msg)
 		}
 		if len(p.CommitMessages) > 0 {

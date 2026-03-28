@@ -2,8 +2,6 @@ package collector
 
 import (
 	"bytes"
-	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,7 +35,7 @@ func (g *GitCollector) Available() bool {
 }
 
 func (g *GitCollector) Collect(dr model.DateRange) ([]model.Activity, error) {
-	repos := g.discoverRepos(os.Stderr)
+	repos := g.discoverRepos()
 	author := g.resolveAuthor()
 
 	var all []model.Activity
@@ -54,22 +52,16 @@ func (g *GitCollector) Collect(dr model.DateRange) ([]model.Activity, error) {
 }
 
 // discoverRepos finds git repositories under the configured scan paths.
-// It scans up to g.maxDepth directory levels deep, writing warnings to w.
-func (g *GitCollector) discoverRepos(w io.Writer) []string {
+// It scans up to g.maxDepth directory levels deep.
+func (g *GitCollector) discoverRepos() []string {
 	seen := make(map[string]bool)
 	var repos []string
 
 	for _, scanPath := range g.scanPaths {
 		if _, err := os.Stat(scanPath); os.IsNotExist(err) {
-			// Path doesn't exist — skip silently. Default paths (~/work, ~/projects,
-			// ~/code) may not be present on every machine.
 			continue
 		}
-		before := len(repos)
 		g.scanDir(scanPath, 0, seen, &repos)
-		if len(repos) == before {
-			fmt.Fprintf(w, "warning: no git repos found under: %s\n", scanPath) //nolint:errcheck
-		}
 	}
 	return repos
 }
