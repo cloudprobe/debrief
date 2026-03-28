@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/model"
 )
 
@@ -18,7 +17,7 @@ func TestClaudeCollector_ParseSampleFile(t *testing.T) {
 	}
 	testdataDir := filepath.Join(wd, "..", "..", "testdata")
 
-	c := &ClaudeCollector{homeDir: "", showCost: true, pricingCfg: config.PricingConfig{}}
+	c := &ClaudeCollector{homeDir: "", showCost: true, pricingTable: directTable()}
 	dr := model.DateRange{
 		Start: time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 3, 26, 0, 0, 0, 0, time.UTC),

@@ -249,7 +249,7 @@ func runCost(dr model.DateRange) error {
 
 func collectActivities(cfg config.Config, dr model.DateRange, costMode bool) []model.Activity {
 	collectors := []collector.Collector{
-		collector.NewClaudeCollector(cfg.ClaudeDir, costMode, cfg.Pricing),
+		collector.NewClaudeCollector(cfg.ClaudeDir, costMode, cfg.Pricing, config.ConfigDir()),
 		collector.NewGitCollector(cfg.GitRepoPaths, cfg.GitDiscoveryDepth),
 	}
 	var all []model.Activity

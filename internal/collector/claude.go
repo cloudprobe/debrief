@@ -56,17 +56,22 @@ type claudeUserMsg struct {
 
 // ClaudeCollector reads Claude Code JSONL session files.
 type ClaudeCollector struct {
-	homeDir    string
-	showCost   bool
-	pricingCfg config.PricingConfig
+	homeDir      string
+	showCost     bool
+	pricingTable map[string]ModelPricing
 }
 
 // NewClaudeCollector creates a new ClaudeCollector.
-func NewClaudeCollector(homeDir string, showCost bool, pricingCfg config.PricingConfig) *ClaudeCollector {
+// cacheDir is the config directory used to cache LiteLLM pricing (e.g. ~/.config/debrief).
+func NewClaudeCollector(homeDir string, showCost bool, pricingCfg config.PricingConfig, cacheDir string) *ClaudeCollector {
 	if homeDir == "" {
 		homeDir, _ = os.UserHomeDir()
 	}
-	return &ClaudeCollector{homeDir: homeDir, showCost: showCost, pricingCfg: pricingCfg}
+	return &ClaudeCollector{
+		homeDir:      homeDir,
+		showCost:     showCost,
+		pricingTable: LoadPricing(cacheDir, pricingCfg),
+	}
 }
 
 func (c *ClaudeCollector) Name() string { return "claude-code" }
@@ -209,8 +214,6 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 	}
 	defer func() { _ = f.Close() }()
 
-	pricingTable := EffectivePricing(c.pricingCfg)
-
 	// Key: "sessionID:project" → accumulator
 	accums := make(map[string]*projectAccum)
 
@@ -328,7 +331,7 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 		if c.showCost {
 			var anyCostKnown bool
 			for m, mu := range pa.byModel {
-				c2, known := CalculateCost(pricingTable, m, mu.tokensIn, mu.tokensOut, mu.cacheRead, mu.cacheWrite)
+				c2, known := CalculateCost(c.pricingTable, m, mu.tokensIn, mu.tokensOut, mu.cacheRead, mu.cacheWrite)
 				if known {
 					cost += c2
 					anyCostKnown = true
