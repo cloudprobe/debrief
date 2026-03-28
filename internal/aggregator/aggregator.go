@@ -113,33 +113,59 @@ func stripConventionalPrefix(msg string) string {
 	return msg
 }
 
-// summarizeCommits produces a headline from commit messages.
-// Strips conventional prefixes and joins up to 3 descriptions.
+// summarizeCommits produces a one-line headline from commit messages.
+// Prefers the first signal commit (feat/fix/refactor/perf); falls back to
+// the first message of any type. The full list is shown as bullets below.
 func summarizeCommits(messages []string) string {
 	if len(messages) == 0 {
 		return ""
 	}
-	var stripped []string
+	// Try signal commits first.
 	for _, m := range messages {
-		s := stripConventionalPrefix(m)
-		if s != "" {
-			// Capitalize first letter.
-			s = strings.ToUpper(s[:1]) + s[1:]
-			stripped = append(stripped, s)
+		if isSignalType(m) {
+			if s := stripConventionalPrefix(m); s != "" {
+				return strings.ToUpper(s[:1]) + s[1:]
+			}
 		}
 	}
-	if len(stripped) == 0 {
-		return ""
+	// Fall back to first commit of any type.
+	for _, m := range messages {
+		if s := stripConventionalPrefix(m); s != "" {
+			return strings.ToUpper(s[:1]) + s[1:]
+		}
 	}
-	if len(stripped) == 1 {
-		return stripped[0]
+	return ""
+}
+
+// isSignalType returns true if a commit message type has standup value.
+// Mirrors the logic in ui.isSignalCommit but kept local to avoid a package cycle.
+func isSignalType(msg string) bool {
+	lower := strings.ToLower(strings.TrimSpace(msg))
+	colonIdx := strings.Index(lower, ":")
+	if colonIdx < 0 {
+		return true // free-form message → signal
 	}
-	if len(stripped) == 2 {
-		// Lowercase second item for natural joining.
-		return stripped[0] + " and " + strings.ToLower(stripped[1][:1]) + stripped[1][1:]
+	prefix := lower[:colonIdx]
+	commitType := prefix
+	scope := ""
+	if i := strings.Index(prefix, "("); i > 0 && strings.HasSuffix(prefix, ")") {
+		commitType = prefix[:i]
+		scope = prefix[i+1 : len(prefix)-1]
 	}
-	// 3+: use first and mention count.
-	return fmt.Sprintf("%s and %d other changes", stripped[0], len(stripped)-1)
+	noiseTypes := map[string]bool{
+		"chore": true, "docs": true, "ci": true, "test": true, "style": true,
+	}
+	noiseScopes := map[string]bool{
+		"lint": true, "nolint": true, "comment": true, "typo": true,
+		"spelling": true, "whitespace": true, "format": true,
+	}
+	if noiseTypes[commitType] {
+		return false
+	}
+	if scope != "" && noiseScopes[scope] {
+		return false
+	}
+	return true
 }
 
 // describeFromFiles produces a headline from file changes when no commits exist.

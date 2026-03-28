@@ -51,8 +51,8 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 		if p.SummaryLine != "" {
 			fmt.Fprintf(&b, "    %s\n", p.SummaryLine)
 		}
-		// Commit bullets.
-		for _, msg := range p.CommitMessages {
+		// Commit bullets — signal commits only, falling back to all if none qualify.
+		for _, msg := range signalCommits(p.CommitMessages) {
 			fmt.Fprintf(&b, "    \u2022 %s\n", msg)
 		}
 		totalCommits += p.CommitCount
@@ -98,7 +98,7 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 		if p.SummaryLine != "" {
 			fmt.Fprintf(&b, "  %s\n", p.SummaryLine)
 		}
-		for _, msg := range p.CommitMessages {
+		for _, msg := range signalCommits(p.CommitMessages) {
 			fmt.Fprintf(&b, "  \u2022 %s\n", msg)
 		}
 		b.WriteString("\n")
@@ -225,7 +225,7 @@ func RenderMarkdown(summary model.DaySummary, opts RenderOptions) string {
 		if p.SummaryLine != "" {
 			fmt.Fprintf(&b, "%s\n\n", p.SummaryLine)
 		}
-		for _, msg := range p.CommitMessages {
+		for _, msg := range signalCommits(p.CommitMessages) {
 			fmt.Fprintf(&b, "- %s\n", msg)
 		}
 		if len(p.CommitMessages) > 0 {
@@ -284,6 +284,61 @@ func formatTokens(n int) string {
 		return fmt.Sprintf("%.1fK", float64(n)/1_000)
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+// noiseCommitTypes are conventional commit prefixes that carry no standup value.
+var noiseCommitTypes = map[string]bool{
+	"chore": true, "docs": true, "ci": true, "test": true, "style": true,
+}
+
+// noiseScopes are scopes within any prefix that produce noise (e.g. fix(lint)).
+var noiseScopes = map[string]bool{
+	"lint": true, "nolint": true, "comment": true, "typo": true,
+	"spelling": true, "whitespace": true, "format": true,
+}
+
+// signalCommits filters commit messages to those with standup value.
+// Falls back to the original slice if nothing survives the filter.
+func signalCommits(messages []string) []string {
+	var out []string
+	for _, msg := range messages {
+		if isSignalCommit(msg) {
+			out = append(out, msg)
+		}
+	}
+	if len(out) == 0 {
+		return messages
+	}
+	return out
+}
+
+// isSignalCommit returns true if the commit message represents real work
+// worth surfacing in a standup — not chore, docs, ci, lint fixes, etc.
+func isSignalCommit(msg string) bool {
+	lower := strings.ToLower(strings.TrimSpace(msg))
+
+	// Parse "type(scope): ..." or "type: ..."
+	colonIdx := strings.Index(lower, ":")
+	if colonIdx < 0 {
+		return true // no conventional prefix → treat as signal
+	}
+	prefix := lower[:colonIdx]
+
+	// Extract scope from "type(scope)".
+	commitType := prefix
+	scope := ""
+	if i := strings.Index(prefix, "("); i > 0 && strings.HasSuffix(prefix, ")") {
+		commitType = prefix[:i]
+		scope = prefix[i+1 : len(prefix)-1]
+	}
+
+	if noiseCommitTypes[commitType] {
+		return false
+	}
+	if scope != "" && noiseScopes[scope] {
+		return false
+	}
+	return true
 }
 
 func sortedProjects(m map[string]model.ProjectSummary) []model.ProjectSummary {
