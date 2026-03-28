@@ -23,10 +23,12 @@ func TestClaudeCollector_ParseSampleFile(t *testing.T) {
 		End:   time.Date(2026, 3, 26, 0, 0, 0, 0, time.UTC),
 	}
 
-	activities, err := c.parseSessionFile(filepath.Join(testdataDir, "claude_sample.jsonl"), dr)
-	if err != nil {
-		t.Fatalf("parseSessionFile: %v", err)
+	accums := make(map[string]*projectAccum)
+	assistantMsgs := make(map[string]deferredMsg)
+	if err := c.scanFile(filepath.Join(testdataDir, "claude_sample.jsonl"), dr, accums, assistantMsgs); err != nil {
+		t.Fatalf("scanFile: %v", err)
 	}
+	activities := c.buildActivities(accums, assistantMsgs)
 
 	if len(activities) != 2 {
 		t.Fatalf("expected 2 activities, got %d", len(activities))

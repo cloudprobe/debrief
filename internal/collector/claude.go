@@ -91,16 +91,21 @@ func (c *ClaudeCollector) Collect(dr model.DateRange) ([]model.Activity, error) 
 		return nil, err
 	}
 
-	var allActivities []model.Activity
+	// Global state shared across all files.
+	// Key: "sessionID:project" → accumulator (interaction counts, file edits, timestamps).
+	accums := make(map[string]*projectAccum)
+	// Global assistant message dedup: message.id → last record seen in any file.
+	// Using a single global map prevents double-counting when the same message
+	// appears in both a parent session file and a subagent file.
+	assistantMsgs := make(map[string]deferredMsg)
+
 	for _, f := range jsonlFiles {
-		activities, err := c.parseSessionFile(f, dr)
-		if err != nil {
+		if err := c.scanFile(f, dr, accums, assistantMsgs); err != nil {
 			continue
 		}
-		allActivities = append(allActivities, activities...)
 	}
 
-	return allActivities, nil
+	return c.buildActivities(accums, assistantMsgs), nil
 }
 
 // findJSONLFiles discovers all .jsonl files under the Claude projects directory.
@@ -208,19 +213,14 @@ type deferredMsg struct {
 	raw json.RawMessage
 }
 
-// parseSessionFile reads a single JSONL file and extracts activities split by project (CWD).
-func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]model.Activity, error) {
+// scanFile reads one JSONL file, populating accums with user events and
+// assistantMsgs with assistant records (global last-wins dedup by message.id).
+func (c *ClaudeCollector) scanFile(path string, dr model.DateRange, accums map[string]*projectAccum, assistantMsgs map[string]deferredMsg) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = f.Close() }()
-
-	// Key: "sessionID:project" → accumulator
-	accums := make(map[string]*projectAccum)
-
-	// Dedup assistant messages by message.id — keep last (most complete) chunk.
-	assistantMsgs := make(map[string]deferredMsg) // message.id → last record
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -236,7 +236,6 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 		}
 
 		project := projectFromCWD(rec.CWD)
-
 		key := rec.SessionID + ":" + project
 		pa, ok := accums[key]
 		if !ok {
@@ -252,18 +251,21 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			}
 
 		case "assistant":
-			// Extract message ID for dedup.
 			var peek struct {
 				ID string `json:"id"`
 			}
 			if err := json.Unmarshal(rec.Message, &peek); err == nil && peek.ID != "" {
+				// Last-wins: overwrite any earlier record with the same message ID.
+				// The final streaming chunk has the complete output_token count.
 				assistantMsgs[peek.ID] = deferredMsg{rec: rec, raw: rec.Message}
 			}
-
 		}
 	}
+	return nil
+}
 
-	// Process deduplicated assistant messages.
+// buildActivities processes the globally deduped assistant messages and returns activities.
+func (c *ClaudeCollector) buildActivities(accums map[string]*projectAccum, assistantMsgs map[string]deferredMsg) []model.Activity {
 	for _, dm := range assistantMsgs {
 		rec := dm.rec
 		project := projectFromCWD(rec.CWD)
@@ -291,9 +293,6 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			mu.cacheWrite += msg.Usage.CacheCreationInputTokens
 		}
 
-		// Scan all text blocks in the turn. The last one is typically a completion
-		// statement ("Done. X is fixed"), but any block may contain one.
-		// We collect candidates and use the best (first qualifying match).
 		var textBlocks []string
 		for _, block := range msg.Content {
 			switch block.Type {
@@ -318,8 +317,7 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 				}
 			}
 		}
-		// Try last text block first (most likely completion statement),
-		// then fall back to earlier blocks if it yields nothing.
+		// Try last text block first (most likely a completion statement).
 		for i := len(textBlocks) - 1; i >= 0; i-- {
 			if note := extractSessionNote(textBlocks[i]); note != "" {
 				pa.sessionNotes = append(pa.sessionNotes, note)
@@ -382,7 +380,7 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 		})
 	}
 
-	return activities, nil
+	return activities
 }
 
 // extractSessionNote extracts a usable standup note from an assistant text block.
