@@ -52,7 +52,7 @@ func RenderText(summary model.DaySummary, opts RenderOptions) string {
 			fmt.Fprintf(&b, "    %s\n", p.SummaryLine)
 		}
 		// Commit bullets — signal commits only, falling back to all if none qualify.
-		for _, msg := range signalCommits(p.CommitMessages) {
+		for _, msg := range SignalCommits(p.CommitMessages) {
 			fmt.Fprintf(&b, "    \u2022 %s\n", msg)
 		}
 		totalCommits += p.CommitCount
@@ -98,7 +98,7 @@ func RenderStandup(summary model.DaySummary, opts RenderOptions) string {
 		if p.SummaryLine != "" {
 			fmt.Fprintf(&b, "  %s\n", p.SummaryLine)
 		}
-		for _, msg := range signalCommits(p.CommitMessages) {
+		for _, msg := range SignalCommits(p.CommitMessages) {
 			fmt.Fprintf(&b, "  \u2022 %s\n", msg)
 		}
 		b.WriteString("\n")
@@ -225,7 +225,7 @@ func RenderMarkdown(summary model.DaySummary, opts RenderOptions) string {
 		if p.SummaryLine != "" {
 			fmt.Fprintf(&b, "%s\n\n", p.SummaryLine)
 		}
-		for _, msg := range signalCommits(p.CommitMessages) {
+		for _, msg := range SignalCommits(p.CommitMessages) {
 			fmt.Fprintf(&b, "- %s\n", msg)
 		}
 		if len(p.CommitMessages) > 0 {
@@ -297,12 +297,12 @@ var noiseScopes = map[string]bool{
 	"spelling": true, "whitespace": true, "format": true,
 }
 
-// signalCommits filters commit messages to those with standup value.
+// SignalCommits filters commit messages to those with standup value.
 // Falls back to the original slice if nothing survives the filter.
-func signalCommits(messages []string) []string {
+func SignalCommits(messages []string) []string {
 	var out []string
 	for _, msg := range messages {
-		if isSignalCommit(msg) {
+		if IsSignalCommit(msg) {
 			out = append(out, msg)
 		}
 	}
@@ -312,9 +312,9 @@ func signalCommits(messages []string) []string {
 	return out
 }
 
-// isSignalCommit returns true if the commit message represents real work
+// IsSignalCommit returns true if the commit message represents real work
 // worth surfacing in a standup — not chore, docs, ci, lint fixes, etc.
-func isSignalCommit(msg string) bool {
+func IsSignalCommit(msg string) bool {
 	lower := strings.ToLower(strings.TrimSpace(msg))
 
 	// Parse "type(scope): ..." or "type: ..."

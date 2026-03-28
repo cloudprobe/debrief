@@ -44,6 +44,7 @@ type claudeUsage struct {
 // claudeContentBlock represents a content block in an assistant message.
 type claudeContentBlock struct {
 	Type  string          `json:"type"` // "text", "tool_use", "thinking"
+	Text  string          `json:"text"` // text content (only for text blocks)
 	Name  string          `json:"name"` // tool name (only for tool_use)
 	Input json.RawMessage `json:"input"`
 }
@@ -142,6 +143,7 @@ type projectAccum struct {
 	tools         map[string]int         // tool name → call count
 	filesCreated  map[string]bool        // unique file paths
 	filesModified map[string]bool        // unique file paths
+	sessionNotes  []string               // completion statements extracted from assistant text
 }
 
 func newProjectAccum(project, cwd, branch, sessionID string, ts time.Time) *projectAccum {
@@ -289,22 +291,34 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			mu.cacheWrite += msg.Usage.CacheCreationInputTokens
 		}
 
+		// The last text block in a turn is typically a completion statement
+		// ("I've fixed X", "Done. Y is now working.") — prime standup material.
+		var lastText string
 		for _, block := range msg.Content {
-			if block.Type != "tool_use" || block.Name == "" {
-				continue
-			}
-			pa.tools[block.Name]++
-
-			switch block.Name {
-			case "Write":
-				if fp := extractFilePath(block.Input); fp != "" {
-					pa.addFile(fp, true)
+			switch block.Type {
+			case "text":
+				if block.Text != "" {
+					lastText = block.Text
 				}
-			case "Edit":
-				if fp := extractFilePath(block.Input); fp != "" {
-					pa.addFile(fp, false)
+			case "tool_use":
+				if block.Name == "" {
+					continue
+				}
+				pa.tools[block.Name]++
+				switch block.Name {
+				case "Write":
+					if fp := extractFilePath(block.Input); fp != "" {
+						pa.addFile(fp, true)
+					}
+				case "Edit":
+					if fp := extractFilePath(block.Input); fp != "" {
+						pa.addFile(fp, false)
+					}
 				}
 			}
+		}
+		if note := extractSessionNote(lastText); note != "" {
+			pa.sessionNotes = append(pa.sessionNotes, note)
 		}
 	}
 
@@ -358,10 +372,137 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			FilesCreated:  setToSlice(pa.filesCreated),
 			FilesModified: setToSlice(pa.filesModified),
 			ToolBreakdown: copyMap(pa.tools),
+			SessionNotes:  pa.sessionNotes,
 		})
 	}
 
 	return activities, nil
+}
+
+// extractSessionNote extracts a usable standup note from an assistant text block.
+// Returns empty string if the text is planning language, code, or too long/short.
+func extractSessionNote(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) == 0 || len(text) > 400 {
+		return ""
+	}
+	// Skip anything that looks like code.
+	if strings.Contains(text, "```") || strings.Contains(text, "\t") {
+		return ""
+	}
+	// Use only the first sentence.
+	sentence := firstSentence(text)
+	if len(sentence) < 15 {
+		return ""
+	}
+	lower := strings.ToLower(sentence)
+	// Skip planning/hedging language — only keep completion statements.
+	planningPrefixes := []string{
+		"let me ", "i'll ", "i will ", "i'm going to ", "i need to ",
+		"let's ", "now i'll ", "next ", "first ", "to ", "the ",
+	}
+	for _, p := range planningPrefixes {
+		if strings.HasPrefix(lower, p) {
+			return ""
+		}
+	}
+	// Must start with an action-oriented word.
+	actionPrefixes := []string{
+		"i've ", "i have ", "done", "fixed", "added", "updated", "removed",
+		"built", "implemented", "created", "refactored", "changed", "moved",
+		"cleaned", "dropped", "replaced", "simplified", "wired", "switched",
+		"deleted", "renamed", "extracted", "merged", "resolved",
+	}
+	for _, p := range actionPrefixes {
+		if strings.HasPrefix(lower, p) {
+			return cleanNote(sentence)
+		}
+	}
+	return ""
+}
+
+// firstSentence returns the first sentence of text.
+// Breaks on ". " (period + space) or ".\n" to avoid cutting on abbreviations,
+// file extensions (.go), or code spans (`.`).
+func firstSentence(text string) string {
+	// Collapse newlines to spaces but track paragraph breaks.
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	// Use first paragraph if multi-paragraph.
+	if idx := strings.Index(text, "\n\n"); idx > 0 {
+		text = text[:idx]
+	}
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = stripMarkdown(text)
+
+	// Break on ". " (sentence end) or "! " or "? ".
+	runes := []rune(text)
+	for i := 0; i < len(runes)-1; i++ {
+		r := runes[i]
+		next := runes[i+1]
+		if (r == '.' || r == '!' || r == '?') && next == ' ' {
+			sentence := strings.TrimSpace(string(runes[:i+1]))
+			if len(sentence) >= 15 {
+				return sentence
+			}
+		}
+	}
+	s := strings.TrimSpace(text)
+	if len(s) > 250 {
+		// Cut at last space before 250.
+		if idx := strings.LastIndex(s[:250], " "); idx > 0 {
+			return s[:idx]
+		}
+		return s[:250]
+	}
+	return s
+}
+
+// stripMarkdown removes common markdown formatting from a string.
+func stripMarkdown(s string) string {
+	// Remove bold/italic: **text** → text, *text* → text, _text_ → text.
+	for _, pair := range []string{"**", "__", "*", "_"} {
+		for strings.Contains(s, pair) {
+			open := strings.Index(s, pair)
+			if open < 0 {
+				break
+			}
+			close := strings.Index(s[open+len(pair):], pair)
+			if close < 0 {
+				// Unterminated — just strip the marker.
+				s = s[:open] + s[open+len(pair):]
+				break
+			}
+			inner := s[open+len(pair) : open+len(pair)+close]
+			s = s[:open] + inner + s[open+len(pair)+close+len(pair):]
+		}
+	}
+	// Remove inline code: `text` → text.
+	for strings.Contains(s, "`") {
+		open := strings.Index(s, "`")
+		close := strings.Index(s[open+1:], "`")
+		if close < 0 {
+			s = s[:open] + s[open+1:]
+			break
+		}
+		inner := s[open+1 : open+1+close]
+		s = s[:open] + inner + s[open+1+close+1:]
+	}
+	// Remove list markers at start.
+	s = strings.TrimPrefix(s, "- ")
+	s = strings.TrimPrefix(s, "• ")
+	return strings.TrimSpace(s)
+}
+
+// cleanNote tidies up a session note for display.
+func cleanNote(s string) string {
+	// Strip "I've " prefix — makes bullets read more naturally in past tense.
+	lower := strings.ToLower(s)
+	if strings.HasPrefix(lower, "i've ") {
+		s = strings.ToUpper(s[5:6]) + s[6:]
+	} else if strings.HasPrefix(lower, "i have ") {
+		s = strings.ToUpper(s[7:8]) + s[8:]
+	}
+	return strings.TrimSpace(s)
 }
 
 // isUserMessage checks if a user record is a real user message (not a tool result).

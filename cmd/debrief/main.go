@@ -12,6 +12,7 @@ import (
 	"github.com/cloudprobe/debrief/internal/collector"
 	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/model"
+	"github.com/cloudprobe/debrief/internal/synthesizer"
 	"github.com/cloudprobe/debrief/internal/ui"
 	versioncheck "github.com/cloudprobe/debrief/internal/version"
 	"github.com/spf13/cobra"
@@ -212,13 +213,7 @@ func runStandup(dr model.DateRange) error {
 	cfg := config.Load()
 	allActivities := collectActivities(cfg, dr, false)
 	days := splitByDay(allActivities, dr)
-	opts := ui.RenderOptions{}
-	for i, day := range days {
-		if i > 0 {
-			fmt.Println()
-		}
-		fmt.Print(ui.RenderStandup(day, opts))
-	}
+	fmt.Print(synthesizer.Synthesize(days))
 	return nil
 }
 

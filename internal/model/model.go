@@ -24,6 +24,7 @@ type Activity struct {
 	Insertions     int            `json:"insertions"`      // git: lines added
 	Deletions      int            `json:"deletions"`       // git: lines removed
 	Summary        string         `json:"summary"`
+	SessionNotes   []string       `json:"session_notes"` // extracted completion text from Claude sessions
 }
 
 // ProjectSummary aggregates activities for a single project.
@@ -42,6 +43,7 @@ type ProjectSummary struct {
 	Models         []string       `json:"models"`
 	Sources        []string       `json:"sources"`
 	SummaryLine    string         `json:"summary_line,omitempty"`
+	SessionNotes   []string       `json:"session_notes,omitempty"` // extracted completion text from Claude sessions
 }
 
 // ModelSummary aggregates token usage and cost by AI model.

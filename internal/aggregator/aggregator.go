@@ -53,6 +53,7 @@ func Aggregate(activities []model.Activity) model.DaySummary {
 		p.FilesCreated = appendUniqueSlice(p.FilesCreated, a.FilesCreated)
 		p.FilesModified = appendUniqueSlice(p.FilesModified, a.FilesModified)
 		p.ToolBreakdown = mergeToolBreakdown(p.ToolBreakdown, a.ToolBreakdown)
+		p.SessionNotes = appendUniqueSlice(p.SessionNotes, a.SessionNotes)
 		summary.ByProject[a.Project] = p
 
 		// By model.
