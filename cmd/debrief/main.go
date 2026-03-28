@@ -204,7 +204,7 @@ func runInit() error {
 	}
 
 	fmt.Printf("Configuration saved to %s\n", cfgFile)
-	fmt.Println("Run `debrief standup` to see today's summary.")
+	fmt.Println("Setup complete.")
 	return nil
 }
 

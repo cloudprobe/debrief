@@ -1,6 +1,10 @@
 package collector
 
-import "github.com/cloudprobe/debrief/internal/config"
+import (
+	"strings"
+
+	"github.com/cloudprobe/debrief/internal/config"
+)
 
 // ModelPricing holds per-million-token rates for a model.
 type ModelPricing struct {
@@ -83,8 +87,25 @@ func bedrockTable() map[string]ModelPricing {
 // known=false means the model has no configured price; caller should display "—".
 // Cache read tokens are charged at 10% of the input rate.
 // Cache write tokens are charged at 125% of the input rate.
+//
+// If the exact model name isn't in the table, the lookup falls back to stripping
+// any trailing date version (-YYYYMMDD or @YYYYMMDD) from both sides, so that
+// e.g. "claude-sonnet-4-5-20250929" matches "claude-sonnet-4-5-20250514".
 func CalculateCost(table map[string]ModelPricing, modelName string, tokensIn, tokensOut, cacheRead, cacheWrite int) (float64, bool) {
 	pricing, ok := table[modelName]
+	if !ok {
+		// Strip date suffix and try matching any table entry with the same base name.
+		base := stripDateSuffix(modelName)
+		if base != modelName {
+			for k, v := range table {
+				if stripDateSuffix(k) == base {
+					pricing = v
+					ok = true
+					break
+				}
+			}
+		}
+	}
 	if !ok {
 		return 0, false
 	}
@@ -95,4 +116,32 @@ func CalculateCost(table map[string]ModelPricing, modelName string, tokensIn, to
 	cacheWriteCost := float64(cacheWrite) * pricing.InputPerMillion * 1.25 / 1_000_000
 
 	return inputCost + outputCost + cacheReadCost + cacheWriteCost, true
+}
+
+// stripDateSuffix removes a trailing date version from a model name.
+// Handles both separator styles used by Anthropic and Vertex:
+//
+//	claude-sonnet-4-5-20250929  →  claude-sonnet-4-5
+//	claude-haiku-4-5@20251001   →  claude-haiku-4-5
+func stripDateSuffix(name string) string {
+	for _, sep := range []byte{'-', '@'} {
+		i := strings.LastIndexByte(name, sep)
+		if i <= 0 {
+			continue
+		}
+		suffix := name[i+1:]
+		if len(suffix) == 8 && isAllDigits(suffix) {
+			return name[:i]
+		}
+	}
+	return name
+}
+
+func isAllDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
