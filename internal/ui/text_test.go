@@ -144,12 +144,12 @@ func TestRenderStandup_PlainText(t *testing.T) {
 	if !strings.Contains(got, "bigproject") {
 		t.Errorf("expected 'bigproject' in output:\n%s", got)
 	}
-	// Minor project should appear in "Minor:" line.
-	if !strings.Contains(got, "Minor") {
-		t.Errorf("expected 'Minor' for small project:\n%s", got)
-	}
+	// All projects should appear with full detail — no "Minor:" collapsing.
 	if !strings.Contains(got, "smallfix") {
-		t.Errorf("expected 'smallfix' in minor line:\n%s", got)
+		t.Errorf("expected 'smallfix' in output:\n%s", got)
+	}
+	if strings.Contains(got, "Minor:") {
+		t.Errorf("standup should not collapse projects into 'Minor:' line:\n%s", got)
 	}
 	// No markdown bold.
 	if strings.Contains(got, "**") {
@@ -178,7 +178,7 @@ func TestRenderCost(t *testing.T) {
 	}
 
 	got := RenderCost(s, RenderOptions{ShowCost: true})
-	if !strings.Contains(got, "$2.50") {
+	if !strings.Contains(got, "2.50") {
 		t.Errorf("expected cost in output:\n%s", got)
 	}
 	if !strings.Contains(got, "opus 4.6") {

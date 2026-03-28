@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -102,7 +101,7 @@ func TestGitCollector_DiscoverReposDepth2(t *testing.T) {
 	}
 
 	g := NewGitCollector([]string{tmpdir}, 2)
-	repos := g.discoverRepos(&bytes.Buffer{})
+	repos := g.discoverRepos()
 
 	if len(repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d: %v", len(repos), repos)
@@ -112,7 +111,7 @@ func TestGitCollector_DiscoverReposDepth2(t *testing.T) {
 	}
 }
 
-func TestGitCollector_DiscoverReposWarning(t *testing.T) {
+func TestGitCollector_DiscoverReposEmpty(t *testing.T) {
 	tmpdir := t.TempDir()
 
 	// Create an empty subdir with no .git repos.
@@ -121,14 +120,10 @@ func TestGitCollector_DiscoverReposWarning(t *testing.T) {
 	}
 
 	g := NewGitCollector([]string{tmpdir}, 2)
-	var buf bytes.Buffer
-	repos := g.discoverRepos(&buf)
+	repos := g.discoverRepos()
 
 	if len(repos) != 0 {
 		t.Fatalf("expected 0 repos, got %d: %v", len(repos), repos)
-	}
-	if !bytes.Contains(buf.Bytes(), []byte("warning:")) {
-		t.Errorf("expected warning output, got: %q", buf.String())
 	}
 }
 
@@ -147,7 +142,7 @@ func TestGitCollector_DiscoverRepos(t *testing.T) {
 	}
 
 	g := &GitCollector{scanPaths: []string{dir}, maxDepth: 2}
-	repos := g.discoverRepos(&bytes.Buffer{})
+	repos := g.discoverRepos()
 
 	if len(repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d: %v", len(repos), repos)

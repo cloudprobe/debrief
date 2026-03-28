@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/model"
 )
 
@@ -18,16 +17,18 @@ func TestClaudeCollector_ParseSampleFile(t *testing.T) {
 	}
 	testdataDir := filepath.Join(wd, "..", "..", "testdata")
 
-	c := &ClaudeCollector{homeDir: "", showCost: true, pricingCfg: config.PricingConfig{}}
+	c := &ClaudeCollector{homeDir: "", showCost: true, pricingTable: directTable()}
 	dr := model.DateRange{
 		Start: time.Date(2026, 3, 25, 0, 0, 0, 0, time.UTC),
 		End:   time.Date(2026, 3, 26, 0, 0, 0, 0, time.UTC),
 	}
 
-	activities, err := c.parseSessionFile(filepath.Join(testdataDir, "claude_sample.jsonl"), dr)
-	if err != nil {
-		t.Fatalf("parseSessionFile: %v", err)
+	accums := make(map[string]*projectAccum)
+	assistantMsgs := make(map[string]deferredMsg)
+	if err := c.scanFile(filepath.Join(testdataDir, "claude_sample.jsonl"), dr, accums, assistantMsgs); err != nil {
+		t.Fatalf("scanFile: %v", err)
 	}
+	activities := c.buildActivities(accums, assistantMsgs)
 
 	if len(activities) != 2 {
 		t.Fatalf("expected 2 activities, got %d", len(activities))
@@ -186,6 +187,25 @@ func TestCalculateCost(t *testing.T) {
 			tokensOut: 500,
 			wantCost:  0,
 			wantKnown: false,
+		},
+		{
+			// claude-sonnet-4-5-20250929 isn't in the table but its base name
+			// claude-sonnet-4-5-20250514 is — fallback should match.
+			name:      "sonnet date-versioned fallback (dash)",
+			model:     "claude-sonnet-4-5-20250929",
+			tokensIn:  1000,
+			tokensOut: 500,
+			wantCost:  (1000.0*3 + 500.0*15) / 1_000_000,
+			wantKnown: true,
+		},
+		{
+			// Same fallback but with @ separator (Vertex AI style).
+			name:      "haiku date-versioned fallback (at)",
+			model:     "claude-haiku-4-5@20261201",
+			tokensIn:  1000,
+			tokensOut: 500,
+			wantCost:  (1000.0*1 + 500.0*5) / 1_000_000,
+			wantKnown: true,
 		},
 	}
 

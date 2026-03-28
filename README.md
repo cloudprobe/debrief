@@ -16,63 +16,69 @@ Or build from source:
 go install github.com/cloudprobe/debrief/cmd/debrief@latest
 ```
 
-## Usage
+## Quick start
 
 ```sh
-debrief                    # today's activity
-debrief yesterday          # yesterday
-debrief week               # this week (per-day breakdown)
-debrief month              # this month
-debrief -d 2026-03-25      # specific date
-debrief -f 2026-03-20 -t 2026-03-25  # date range
+debrief init       # first-time setup (choose your Claude access type)
+debrief standup    # today's standup summary
+debrief cost       # today's estimated API cost
+```
 
-debrief standup            # copy-paste standup bullets
-debrief standup week       # standup for the whole week
+## Usage
 
-debrief -c                 # cost view (today)
-debrief -c week            # weekly cost with per-model breakdown
-debrief -c month           # monthly cost with per-model breakdown
+### standup — copy-paste standup bullets
 
-debrief --detail           # show per-session detail
-debrief --no-git           # skip git, only show AI sessions
-debrief -o json            # JSON output
-debrief -o markdown        # markdown for PRs/wikis
-debrief -v                 # verbose/debug output
+```sh
+debrief standup            # today
+debrief standup yesterday  # yesterday
+debrief standup week       # this week (per-day breakdown)
+
+debrief standup -d 2026-03-25              # specific date
+debrief standup -f 2026-03-20 -t 2026-03-25  # date range
+```
+
+### cost — estimated API cost
+
+```sh
+debrief cost           # today
+debrief cost yesterday # yesterday
+debrief cost week      # this week with per-model breakdown
+debrief cost month     # this month with per-model breakdown
+```
+
+> **Note:** `debrief cost` requires running `debrief init` first to set your access type.
+> If you're on a Max/Pro subscription, per-token costs don't apply — `debrief standup` is what you want.
+
+### Other commands
+
+```sh
+debrief init     # first-time setup: configure your Claude access type
+debrief version  # print the current version
 ```
 
 ## What it does
 
 Reads your local Claude Code session files and git history. No API calls, no network access — everything is local.
 
-**Default view** — what you actually did:
-```
-  Your day — Wednesday, Mar 26 2026
-  ──────────────────────────────────────────────────────
-
-  cloudprobe/debrief
-    Built out new code with Claude
-    ~4h 37m active
-    Created 10 files, updated 14 files — main.go, text.go, aggregator.go +13 more
-    Committed: "rename to debrief", "add message dedup" +3 more
-    +340 -89 lines
-
-  cloudprobe/dotfiles
-    Made updates with Claude
-    ~20m active
-    updated 2 files — .zshrc, .gitconfig
-
-  ──────────────────────────────────────────────────────
-  2 repos · 26 files changed · 5 commits · +340 -89 lines · 2 deep sessions
-```
-
 **Standup** — plain text bullets for your team:
+
 ```
 Mar 26 2026:
-• Built out cloudprobe/debrief — 10 new files (main.go, text.go, aggregator.go, model.go)
-• Minor work on cloudprobe/dotfiles
+
+cloudprobe/debrief
+  Built out new collector and added message dedup
+  • rename to debrief
+  • add message dedup
+  • fix aggregator edge case
+
+cloudprobe/dotfiles
+  Updated zshrc and gitconfig
+
+Minor: cloudprobe/helm-charts
 ```
 
 **Cost** — billing view with per-model breakdown:
+
 ```
   Cost — Wednesday, Mar 26 2026
   ──────────────────────────────────────────────────────
@@ -90,31 +96,48 @@ Mar 26 2026:
     haiku 4.5                  $1.14
 ```
 
-## Configuration
+## Global flags
 
-Optional config file at `~/.config/debrief/config.yaml`:
-
-```yaml
-git_repo_paths:
-  - ~/work
-  - ~/projects
-  - ~/code
-
-default_format: text  # text, json, standup, markdown
-```
-
-## Flags
+These flags work with any command:
 
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--date` | `-d` | Specific date (YYYY-MM-DD) |
-| `--from` | `-f` | Start date for range |
-| `--to` | `-t` | End date for range |
-| `--cost` | `-c` | Show billing view |
-| `--format` | `-o` | Output format: text, json, standup, markdown |
-| `--verbose` | `-v` | Debug output on stderr |
-| `--detail` | | Show per-session detail |
-| `--no-git` | | Skip git collection |
+| `--from` | `-f` | Start date for range (YYYY-MM-DD) |
+| `--to` | `-t` | End date for range (YYYY-MM-DD) |
+| `--version` | | Print version and exit |
+
+## Configuration
+
+Optional config file at `~/.config/debrief/config.yaml` (respects `$XDG_CONFIG_HOME`).
+
+Run `debrief init` to create the initial config interactively.
+
+```yaml
+# Directories to scan for git repositories (default: ~/work, ~/projects, ~/code).
+# If a configured path doesn't exist, debrief prints a warning to stderr.
+git_repo_paths:
+  - ~/work
+  - ~/projects
+
+# How many directory levels deep to scan for git repos (default: 2).
+git_discovery_depth: 2
+
+# Override the default ~/.claude/projects/ path for Claude Code session files.
+# claude_dir: /custom/path
+
+# Pricing preset: "direct" (Anthropic API), "max" (Max/Pro subscription),
+# "vertex" (Google Vertex AI), or "bedrock" (AWS Bedrock).
+# Set interactively via `debrief init`.
+pricing:
+  preset: direct
+
+  # Optional per-model rate overrides (USD per 1M tokens).
+  # overrides:
+  #   my-custom-model:
+  #     input_per_million: 3.00
+  #     output_per_million: 15.00
+```
 
 ## Contributing
 

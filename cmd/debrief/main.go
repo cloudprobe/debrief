@@ -12,6 +12,7 @@ import (
 	"github.com/cloudprobe/debrief/internal/collector"
 	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/model"
+	"github.com/cloudprobe/debrief/internal/synthesizer"
 	"github.com/cloudprobe/debrief/internal/ui"
 	versioncheck "github.com/cloudprobe/debrief/internal/version"
 	"github.com/spf13/cobra"
@@ -204,7 +205,7 @@ func runInit() error {
 	}
 
 	fmt.Printf("Configuration saved to %s\n", cfgFile)
-	fmt.Println("Run `debrief standup` to see today's summary.")
+	fmt.Println("Setup complete.")
 	return nil
 }
 
@@ -212,13 +213,7 @@ func runStandup(dr model.DateRange) error {
 	cfg := config.Load()
 	allActivities := collectActivities(cfg, dr, false)
 	days := splitByDay(allActivities, dr)
-	opts := ui.RenderOptions{}
-	for i, day := range days {
-		if i > 0 {
-			fmt.Println()
-		}
-		fmt.Print(ui.RenderStandup(day, opts))
-	}
+	fmt.Print(synthesizer.Synthesize(days))
 	return nil
 }
 
@@ -249,7 +244,7 @@ func runCost(dr model.DateRange) error {
 
 func collectActivities(cfg config.Config, dr model.DateRange, costMode bool) []model.Activity {
 	collectors := []collector.Collector{
-		collector.NewClaudeCollector(cfg.ClaudeDir, costMode, cfg.Pricing),
+		collector.NewClaudeCollector(cfg.ClaudeDir, costMode, cfg.Pricing, config.ConfigDir()),
 		collector.NewGitCollector(cfg.GitRepoPaths, cfg.GitDiscoveryDepth),
 	}
 	var all []model.Activity
