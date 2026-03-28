@@ -291,14 +291,15 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 			mu.cacheWrite += msg.Usage.CacheCreationInputTokens
 		}
 
-		// The last text block in a turn is typically a completion statement
-		// ("I've fixed X", "Done. Y is now working.") — prime standup material.
-		var lastText string
+		// Scan all text blocks in the turn. The last one is typically a completion
+		// statement ("Done. X is fixed"), but any block may contain one.
+		// We collect candidates and use the best (first qualifying match).
+		var textBlocks []string
 		for _, block := range msg.Content {
 			switch block.Type {
 			case "text":
 				if block.Text != "" {
-					lastText = block.Text
+					textBlocks = append(textBlocks, block.Text)
 				}
 			case "tool_use":
 				if block.Name == "" {
@@ -317,8 +318,13 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 				}
 			}
 		}
-		if note := extractSessionNote(lastText); note != "" {
-			pa.sessionNotes = append(pa.sessionNotes, note)
+		// Try last text block first (most likely completion statement),
+		// then fall back to earlier blocks if it yields nothing.
+		for i := len(textBlocks) - 1; i >= 0; i-- {
+			if note := extractSessionNote(textBlocks[i]); note != "" {
+				pa.sessionNotes = append(pa.sessionNotes, note)
+				break
+			}
 		}
 	}
 
@@ -383,14 +389,14 @@ func (c *ClaudeCollector) parseSessionFile(path string, dr model.DateRange) ([]m
 // Returns empty string if the text is planning language, code, or too long/short.
 func extractSessionNote(text string) string {
 	text = strings.TrimSpace(text)
-	if len(text) == 0 || len(text) > 400 {
+	if len(text) == 0 || len(text) > 600 {
 		return ""
 	}
 	// Skip anything that looks like code.
 	if strings.Contains(text, "```") || strings.Contains(text, "\t") {
 		return ""
 	}
-	// Use only the first sentence.
+	// Use the best sentence from the text.
 	sentence := firstSentence(text)
 	if len(sentence) < 15 {
 		return ""
@@ -399,14 +405,14 @@ func extractSessionNote(text string) string {
 	// Skip planning/hedging language — only keep completion statements.
 	planningPrefixes := []string{
 		"let me ", "i'll ", "i will ", "i'm going to ", "i need to ",
-		"let's ", "now i'll ", "next ", "first ", "to ", "the ",
+		"let's ", "now i'll ", "next ", "first ", "to ",
 	}
 	for _, p := range planningPrefixes {
 		if strings.HasPrefix(lower, p) {
 			return ""
 		}
 	}
-	// Must start with an action-oriented word.
+	// Must start with an action-oriented word (including "done" variants).
 	actionPrefixes := []string{
 		"i've ", "i have ", "done", "fixed", "added", "updated", "removed",
 		"built", "implemented", "created", "refactored", "changed", "moved",
@@ -415,46 +421,136 @@ func extractSessionNote(text string) string {
 	}
 	for _, p := range actionPrefixes {
 		if strings.HasPrefix(lower, p) {
-			return cleanNote(sentence)
+			note := cleanNote(sentence)
+			if note == "" {
+				return ""
+			}
+			// Skip list intros: ends with ":" or contains "- " after a colon.
+			trimmed := strings.TrimRight(note, " ")
+			if strings.HasSuffix(trimmed, ":") {
+				return ""
+			}
+			if colonIdx := strings.Index(note, ":"); colonIdx > 0 && strings.Contains(note[colonIdx:], " - ") {
+				return ""
+			}
+			// Skip numbered list fragments: ends with " N." (e.g. "items: 1.").
+			if matched := numberedListSuffix(note); matched {
+				return ""
+			}
+			// Skip conversational responses — work descriptions don't address the reader.
+			if isConversational(note) {
+				return ""
+			}
+			// Skip truncated notes (ends mid-abbreviation or with an open paren).
+			if strings.HasSuffix(note, "(e.g.") || strings.HasSuffix(note, "(i.e.") ||
+				strings.HasSuffix(note, "(") || strings.HasSuffix(note, "e.g.") {
+				return ""
+			}
+			return note
 		}
 	}
 	return ""
 }
 
+// abbreviations are words ending in "." that should not break sentences.
+var abbreviations = map[string]bool{
+	"e.g": true, "i.e": true, "vs": true, "etc": true, "mr": true,
+	"dr": true, "st": true, "jan": true, "feb": true, "mar": true,
+	"apr": true, "jun": true, "jul": true, "aug": true, "sep": true,
+	"oct": true, "nov": true, "dec": true,
+}
+
 // firstSentence returns the first sentence of text.
-// Breaks on ". " (period + space) or ".\n" to avoid cutting on abbreviations,
-// file extensions (.go), or code spans (`.`).
+// Breaks on ". " but skips abbreviations (e.g., i.e., vs.) to avoid false cuts.
 func firstSentence(text string) string {
-	// Collapse newlines to spaces but track paragraph breaks.
 	text = strings.ReplaceAll(text, "\r\n", "\n")
-	// Use first paragraph if multi-paragraph.
+	// Use first paragraph only.
 	if idx := strings.Index(text, "\n\n"); idx > 0 {
 		text = text[:idx]
 	}
 	text = strings.ReplaceAll(text, "\n", " ")
 	text = stripMarkdown(text)
 
-	// Break on ". " (sentence end) or "! " or "? ".
-	runes := []rune(text)
-	for i := 0; i < len(runes)-1; i++ {
-		r := runes[i]
-		next := runes[i+1]
-		if (r == '.' || r == '!' || r == '?') && next == ' ' {
-			sentence := strings.TrimSpace(string(runes[:i+1]))
+	words := strings.Fields(text)
+	var buf []string
+	for _, w := range words {
+		buf = append(buf, w)
+		// Check for sentence-ending punctuation followed by space (implicit since we split).
+		last := w[len(w)-1]
+		if last == '.' || last == '!' || last == '?' {
+			// Check it's not an abbreviation.
+			bare := strings.ToLower(strings.TrimRight(w, ".!?"))
+			if abbreviations[bare] {
+				continue
+			}
+			sentence := strings.Join(buf, " ")
 			if len(sentence) >= 15 {
 				return sentence
 			}
+			// Too short (e.g. "Done.") — keep going to find more content.
 		}
 	}
 	s := strings.TrimSpace(text)
 	if len(s) > 250 {
-		// Cut at last space before 250.
 		if idx := strings.LastIndex(s[:250], " "); idx > 0 {
 			return s[:idx]
 		}
 		return s[:250]
 	}
 	return s
+}
+
+// numberedListSuffix returns true if the string ends with a numbered list marker like " 1."
+func numberedListSuffix(s string) bool {
+	// Match trailing pattern: space + digits + period, e.g. "captured: 1."
+	s = strings.TrimSpace(s)
+	if len(s) < 3 {
+		return false
+	}
+	if s[len(s)-1] != '.' {
+		return false
+	}
+	// Walk back past digits.
+	i := len(s) - 2
+	if i < 0 || s[i] < '0' || s[i] > '9' {
+		return false
+	}
+	for i > 0 && s[i] >= '0' && s[i] <= '9' {
+		i--
+	}
+	return s[i] == ' ' || s[i] == ':'
+}
+
+// isConversational returns true if the note is a chat response rather than a
+// description of work done — these should not appear in standup output.
+func isConversational(s string) bool {
+	lower := strings.ToLower(s)
+
+	// Contains a URL — not a standup bullet.
+	if strings.Contains(s, "http://") || strings.Contains(s, "https://") {
+		return true
+	}
+
+	// Addresses the reader directly ("you", "your").
+	for _, w := range strings.Fields(lower) {
+		w = strings.Trim(w, ".,;:!?\"'()")
+		if w == "you" || w == "your" || w == "you're" || w == "you'll" || w == "yourself" {
+			return true
+		}
+	}
+
+	// Imperative phrases directed at the user rather than describing completed work.
+	imperativePrefixes := []string{
+		"go ahead", "feel free", "keep the", "keep in", "paste ", "try the",
+		"run the", "check the", "note that", "just ", "sure,", "of course",
+	}
+	for _, p := range imperativePrefixes {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // stripMarkdown removes common markdown formatting from a string.
@@ -493,15 +589,40 @@ func stripMarkdown(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// cleanNote tidies up a session note for display.
+// cleanNote strips robotic prefixes and humanizes a session note.
+// "Done. README now shows X" → "README now shows X"
+// "Done — removed from tracking" → "Removed from tracking"
+// "I've added X" → "Added X"
 func cleanNote(s string) string {
-	// Strip "I've " prefix — makes bullets read more naturally in past tense.
+	s = strings.TrimSpace(s)
 	lower := strings.ToLower(s)
+
+	// Strip "Done." / "Done —" / "Done:" / "Done," variants first,
+	// then capitalize and return the remainder.
+	donePrefixes := []string{
+		"done. ", "done — ", "done — ", "done: ", "done, ", "done!\n", "done! ",
+	}
+	for _, p := range donePrefixes {
+		if strings.HasPrefix(lower, p) {
+			rest := strings.TrimSpace(s[len(p):])
+			if rest == "" {
+				return ""
+			}
+			return strings.ToUpper(rest[:1]) + rest[1:]
+		}
+	}
+	// Bare "Done." / "Done" with nothing after — not useful.
+	if lower == "done." || lower == "done" || lower == "done!" {
+		return ""
+	}
+
+	// Strip "I've " / "I have " — convert to past tense third-person.
 	if strings.HasPrefix(lower, "i've ") {
 		s = strings.ToUpper(s[5:6]) + s[6:]
 	} else if strings.HasPrefix(lower, "i have ") {
 		s = strings.ToUpper(s[7:8]) + s[8:]
 	}
+
 	return strings.TrimSpace(s)
 }
 
