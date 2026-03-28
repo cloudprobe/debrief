@@ -616,9 +616,15 @@ func cleanNote(s string) string {
 
 	// Strip "I've " / "I have " — convert to past tense third-person.
 	if strings.HasPrefix(lower, "i've ") {
-		s = strings.ToUpper(s[5:6]) + s[6:]
+		rest := s[5:]
+		if len(rest) > 0 {
+			s = strings.ToUpper(rest[:1]) + rest[1:]
+		}
 	} else if strings.HasPrefix(lower, "i have ") {
-		s = strings.ToUpper(s[7:8]) + s[8:]
+		rest := s[7:]
+		if len(rest) > 0 {
+			s = strings.ToUpper(rest[:1]) + rest[1:]
+		}
 	}
 
 	return strings.TrimSpace(s)
