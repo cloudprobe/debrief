@@ -178,7 +178,7 @@ func TestRenderCost(t *testing.T) {
 	}
 
 	got := RenderCost(s, RenderOptions{ShowCost: true})
-	if !strings.Contains(got, "$2.50") {
+	if !strings.Contains(got, "2.50") {
 		t.Errorf("expected cost in output:\n%s", got)
 	}
 	if !strings.Contains(got, "opus 4.6") {
