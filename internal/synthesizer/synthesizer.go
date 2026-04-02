@@ -15,13 +15,20 @@ import (
 // Synthesize produces a standup summary from one or more day summaries.
 // totalDays is the number of calendar days in the requested period (used for
 // the period summary line on multi-day views). Pass 0 to default to len(days).
-func Synthesize(days []model.DaySummary, totalDays int) string {
+// byProject groups bullets under project name headers; when false bullets are
+// rendered as a flat list with no project headers (default for copy-paste use).
+func Synthesize(days []model.DaySummary, totalDays int, byProject bool) string {
 	var b strings.Builder
+
+	render := renderDayFlat
+	if byProject {
+		render = renderDay
+	}
 
 	renderedCount := 0
 	for _, day := range days {
 		var dayBuf strings.Builder
-		renderDay(&dayBuf, day)
+		render(&dayBuf, day)
 		if dayBuf.Len() > 0 {
 			if renderedCount > 0 {
 				b.WriteString("\n")
@@ -87,6 +94,20 @@ func renderDay(b *strings.Builder, day model.DaySummary) {
 			fmt.Fprintf(b, "  PRs: %s\n", strings.Join(links, "  "))
 		}
 		any = true
+	}
+}
+
+// renderDayFlat renders all bullets from all projects as a flat list with no
+// project name headers — suitable for copy-pasting into Slack or standup docs.
+func renderDayFlat(b *strings.Builder, day model.DaySummary) {
+	if len(day.Activities) == 0 {
+		return
+	}
+	projects := sortedProjects(day.ByProject)
+	for _, p := range projects {
+		for _, bullet := range bulletsForProject(p) {
+			fmt.Fprintf(b, "  \u2022 %s\n", bullet)
+		}
 	}
 }
 

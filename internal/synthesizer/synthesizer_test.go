@@ -74,7 +74,7 @@ func TestSynthesizePeriodSummary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Synthesize(tt.days, tt.totalDays)
+			got := Synthesize(tt.days, tt.totalDays, true)
 			for _, want := range tt.wantContains {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected output to contain %q, got:\n%s", want, got)
@@ -161,7 +161,7 @@ func TestSynthesizeEmptyDaySuppression(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Synthesize(tt.days, len(tt.days))
+			got := Synthesize(tt.days, len(tt.days), true)
 			for _, want := range tt.wantContains {
 				if !strings.Contains(got, want) {
 					t.Errorf("expected output to contain %q, got:\n%s", want, got)
@@ -209,7 +209,7 @@ func TestSynthesizeActiveDaysCount(t *testing.T) {
 			},
 		},
 	}
-	got := Synthesize(days, 5)
+	got := Synthesize(days, 5, true)
 	// activeDays = 3 (all 3 days have ByProject data), totalDays = 5
 	if !strings.Contains(got, "active 3 of 5 days") {
 		t.Errorf("expected 'active 3 of 5 days' in output, got:\n%s", got)
@@ -265,7 +265,7 @@ func TestSynthesizePRLinks(t *testing.T) {
 					CommitCount:    len(tt.commits),
 				},
 			}
-			got := Synthesize([]model.DaySummary{day(projects)}, 0)
+			got := Synthesize([]model.DaySummary{day(projects)}, 0, true)
 			if tt.wantPRs {
 				if !strings.Contains(got, tt.wantPRLink) {
 					t.Errorf("expected output to contain %q, got:\n%s", tt.wantPRLink, got)
@@ -276,6 +276,56 @@ func TestSynthesizePRLinks(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSynthesizeFlatDefault_NoBulletProjectHeaders(t *testing.T) {
+	days := []model.DaySummary{
+		{
+			Date:       time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC),
+			Activities: []model.Activity{{Project: "claude", Source: "claude-code"}, {Project: "cloudprobe/debrief", Source: "git"}},
+			ByProject: map[string]model.ProjectSummary{
+				"claude":             {Name: "claude", SessionNotes: []string{"Added unit test for session notes"}},
+				"cloudprobe/debrief": {Name: "cloudprobe/debrief", CommitMessages: []string{"feat: extract noCostData constant"}},
+			},
+		},
+	}
+
+	got := Synthesize(days, 1, false)
+
+	if strings.Contains(got, "claude\n") {
+		t.Errorf("flat mode should not contain project header 'claude', got:\n%s", got)
+	}
+	if strings.Contains(got, "cloudprobe/debrief\n") {
+		t.Errorf("flat mode should not contain project header 'cloudprobe/debrief', got:\n%s", got)
+	}
+	if !strings.Contains(got, "Added unit test for session notes") {
+		t.Errorf("flat mode should contain session note bullet, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Extract noCostData constant") {
+		t.Errorf("flat mode should contain commit bullet, got:\n%s", got)
+	}
+}
+
+func TestSynthesizeByProject_ShowsProjectHeaders(t *testing.T) {
+	days := []model.DaySummary{
+		{
+			Date:       time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC),
+			Activities: []model.Activity{{Project: "claude", Source: "claude-code"}, {Project: "cloudprobe/debrief", Source: "git"}},
+			ByProject: map[string]model.ProjectSummary{
+				"claude":             {Name: "claude", SessionNotes: []string{"Added unit test for session notes"}},
+				"cloudprobe/debrief": {Name: "cloudprobe/debrief", CommitMessages: []string{"feat: extract noCostData constant"}},
+			},
+		},
+	}
+
+	got := Synthesize(days, 1, true)
+
+	if !strings.Contains(got, "claude\n") {
+		t.Errorf("by-project mode should contain 'claude' header, got:\n%s", got)
+	}
+	if !strings.Contains(got, "cloudprobe/debrief\n") {
+		t.Errorf("by-project mode should contain 'cloudprobe/debrief' header, got:\n%s", got)
 	}
 }
 

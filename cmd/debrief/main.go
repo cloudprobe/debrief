@@ -87,6 +87,7 @@ func initCmd() *cobra.Command {
 
 func standupCmd() *cobra.Command {
 	var projectFilter string
+	var byProject bool
 	cmd := &cobra.Command{
 		Use:       "standup [today|yesterday|week|month]",
 		Short:     "Generate a copy-paste standup summary",
@@ -97,26 +98,27 @@ func standupCmd() *cobra.Command {
 			if len(args) > 0 {
 				switch args[0] {
 				case "today":
-					return runStandup(daterange.TodayRange(), "", projectFilter)
+					return runStandup(daterange.TodayRange(), "", projectFilter, byProject)
 				case "yesterday":
-					return runStandup(daterange.YesterdayRange(), "", projectFilter)
+					return runStandup(daterange.YesterdayRange(), "", projectFilter, byProject)
 				case argWeek:
 					dr := daterange.WeekRange()
 					sun := dr.Start.AddDate(0, 0, 6)
-					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter)
+					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, byProject)
 				case "month":
 					dr := daterange.MonthRange()
-					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter)
+					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, byProject)
 				}
 			}
 			dr, err := daterange.Resolve(date)
 			if err != nil {
 				return err
 			}
-			return runStandup(dr, "", projectFilter)
+			return runStandup(dr, "", projectFilter, byProject)
 		},
 	}
 	cmd.Flags().StringVarP(&projectFilter, "project", "p", "", "filter to projects matching name")
+	cmd.Flags().BoolVar(&byProject, "by-project", false, "group bullets under project headers")
 	return cmd
 }
 
@@ -225,7 +227,7 @@ func runInit() error {
 	return nil
 }
 
-func runStandup(dr model.DateRange, header string, projectFilter string) error {
+func runStandup(dr model.DateRange, header string, projectFilter string, byProject bool) error {
 	cfg := config.Load()
 	allActivities := collectActivities(cfg, dr, false)
 	days := daterange.SplitByDay(allActivities, dr, aggregator.Aggregate)
@@ -245,7 +247,7 @@ func runStandup(dr model.DateRange, header string, projectFilter string) error {
 	if totalDays < 1 {
 		totalDays = 1
 	}
-	fmt.Print(synthesizer.Synthesize(days, totalDays))
+	fmt.Print(synthesizer.Synthesize(days, totalDays, byProject))
 	return nil
 }
 
