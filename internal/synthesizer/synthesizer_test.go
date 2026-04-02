@@ -285,9 +285,9 @@ func TestSignificantWords(t *testing.T) {
 		want  []string
 	}{
 		{"add authentication module", []string{"authentication", "module"}},
-		{"fix the crash", []string{"crash"}},                              // "the" < 4 chars
-		{"refactor with helpers", []string{"refactor", "helpers"}},        // "with" is noise
-		{"from this into that", []string{}},                               // all noise/short
+		{"fix the crash", []string{"crash"}},                                    // "the" < 4 chars
+		{"refactor with helpers", []string{"refactor", "helpers"}},              // "with" is noise
+		{"from this into that", []string{}},                                     // all noise/short
 		{"fixed, updated; deployed.", []string{"fixed", "updated", "deployed"}}, // punctuation stripped
 		{"", nil},
 	}

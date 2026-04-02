@@ -361,8 +361,8 @@ func TestNumberedListSuffix(t *testing.T) {
 		{"plain sentence.", false},
 		{"ends with number 42", false},
 		{"", false},
-		{"a.", false},    // single letter, not digit
-		{"a 1", false},  // no trailing period
+		{"a.", false},  // single letter, not digit
+		{"a 1", false}, // no trailing period
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
