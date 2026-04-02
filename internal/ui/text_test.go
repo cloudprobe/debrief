@@ -305,3 +305,43 @@ func TestExtractPRLinks(t *testing.T) {
 		})
 	}
 }
+
+func TestIsSignalCommit(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want bool
+	}{
+		// noise types → false
+		{"chore: bump deps", false},
+		{"docs: update readme", false},
+		{"ci: fix pipeline", false},
+		{"test: add unit tests", false},
+		{"style: format code", false},
+		// signal types → true
+		{"feat: add login", true},
+		{"fix: resolve crash", true},
+		{"refactor: clean up auth", true},
+		{"perf: speed up query", true},
+		{"build: update makefile", true},
+		// noise scopes → false
+		{"fix(lint): nolint directive", false},
+		{"fix(typo): spelling", false},
+		{"fix(whitespace): trailing spaces", false},
+		// signal scopes → true
+		{"fix(auth): token expiry", true},
+		{"feat(api): new endpoint", true},
+		// no conventional prefix → signal
+		{"initial commit", true},
+		{"wip something", true},
+		// uppercase → still parsed correctly
+		{"FEAT: add thing", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.msg, func(t *testing.T) {
+			got := IsSignalCommit(tt.msg)
+			if got != tt.want {
+				t.Errorf("IsSignalCommit(%q) = %v, want %v", tt.msg, got, tt.want)
+			}
+		})
+	}
+}

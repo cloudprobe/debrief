@@ -278,3 +278,122 @@ func TestSynthesizePRLinks(t *testing.T) {
 		})
 	}
 }
+
+func TestSignificantWords(t *testing.T) {
+	tests := []struct {
+		input string
+		want  []string
+	}{
+		{"add authentication module", []string{"authentication", "module"}},
+		{"fix the crash", []string{"crash"}},                              // "the" < 4 chars
+		{"refactor with helpers", []string{"refactor", "helpers"}},        // "with" is noise
+		{"from this into that", []string{}},                               // all noise/short
+		{"fixed, updated; deployed.", []string{"fixed", "updated", "deployed"}}, // punctuation stripped
+		{"", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := significantWords(tt.input)
+			if len(got) != len(tt.want) {
+				t.Fatalf("significantWords(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("significantWords(%q)[%d] = %q, want %q", tt.input, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestCoveredByNotes(t *testing.T) {
+	tests := []struct {
+		name      string
+		commitMsg string
+		notes     []string
+		want      bool
+	}{
+		{
+			name:      "commit words mostly in note",
+			commitMsg: "refactor authentication module",
+			notes:     []string{"Refactored the authentication module to reduce complexity"},
+			want:      true,
+		},
+		{
+			name:      "commit words not in notes",
+			commitMsg: "implement payment gateway",
+			notes:     []string{"Fixed authentication bug"},
+			want:      false,
+		},
+		{
+			name:      "empty notes",
+			commitMsg: "refactor authentication",
+			notes:     []string{},
+			want:      false,
+		},
+		{
+			name:      "commit with only short/noise words",
+			commitMsg: "fix the bug with this",
+			notes:     []string{"Fixed something"},
+			want:      false, // no significant words → false
+		},
+		{
+			name:      "partial match across multiple notes",
+			commitMsg: "implement search feature",
+			notes:     []string{"Added login page", "Implemented search feature with filters"},
+			want:      true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := coveredByNotes(tt.commitMsg, tt.notes)
+			if got != tt.want {
+				t.Errorf("coveredByNotes(%q, %v) = %v, want %v", tt.commitMsg, tt.notes, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStripPrefix(t *testing.T) {
+	tests := []struct {
+		msg  string
+		want string
+	}{
+		{"feat: add login page", "Add login page"},
+		{"fix: resolve crash", "Resolve crash"},
+		{"refactor: clean up auth", "Clean up auth"},
+		{"chore: bump deps", "Bump deps"},
+		{"docs: update readme", "Update readme"},
+		{"feat(auth): add OAuth", "Add OAuth"},
+		{"unknown: something", "unknown: something"}, // non-standard prefix kept
+		{"no prefix at all", "no prefix at all"},
+		{"feat: ", "feat: "}, // empty after colon → keep original
+	}
+	for _, tt := range tests {
+		t.Run(tt.msg, func(t *testing.T) {
+			got := stripPrefix(tt.msg)
+			if got != tt.want {
+				t.Errorf("stripPrefix(%q) = %q, want %q", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSortedProjects(t *testing.T) {
+	byProject := map[string]model.ProjectSummary{
+		"low":    {Name: "low", CommitCount: 1, Interactions: 0},
+		"medium": {Name: "medium", CommitCount: 3, Interactions: 2},
+		"high":   {Name: "high", CommitCount: 5, Interactions: 10},
+	}
+	got := sortedProjects(byProject)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 projects, got %d", len(got))
+	}
+	// high should come first (highest score), low should be last.
+	if got[0].Name != "high" {
+		t.Errorf("expected high-activity project first, got %q", got[0].Name)
+	}
+	if got[len(got)-1].Name != "low" {
+		t.Errorf("expected low-activity project last, got %q", got[len(got)-1].Name)
+	}
+}

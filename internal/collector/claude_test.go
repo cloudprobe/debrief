@@ -293,3 +293,83 @@ func TestSessionNotes(t *testing.T) {
 		})
 	}
 }
+
+func TestStripMarkdown(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"**bold text**", "bold text"},
+		{"*italic*", "italic"},
+		{"__underline__", "underline"},
+		{"_emphasis_", "emphasis"},
+		{"`inline code`", "inline code"},
+		{"- list item", "list item"},
+		{"• bullet item", "bullet item"},
+		{"**bold** and *italic*", "bold and italic"},
+		{"unterminated **bold", "unterminated bold"},
+		{"unterminated `code", "unterminated code"},
+		{"plain text", "plain text"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := stripMarkdown(tt.input)
+			if got != tt.want {
+				t.Errorf("stripMarkdown(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCleanNote(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Done. README now shows the version", "README now shows the version"},
+		{"Done — removed from tracking", "Removed from tracking"},
+		{"Done: config saved", "Config saved"},
+		{"Done, tests pass", "Tests pass"},
+		{"Done! All good", "All good"},
+		{"Done.", ""},
+		{"Done", ""},
+		{"Done!", ""},
+		{"I've added the feature", "Added the feature"},
+		{"I have updated the config", "Updated the config"},
+		{"Fixed the bug", "Fixed the bug"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := cleanNote(tt.input)
+			if got != tt.want {
+				t.Errorf("cleanNote(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNumberedListSuffix(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"captured items: 1.", true},
+		{"step 2.", true},
+		{"the following: 12.", true},
+		{"plain sentence.", false},
+		{"ends with number 42", false},
+		{"", false},
+		{"a.", false},    // single letter, not digit
+		{"a 1", false},  // no trailing period
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := numberedListSuffix(tt.input)
+			if got != tt.want {
+				t.Errorf("numberedListSuffix(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
