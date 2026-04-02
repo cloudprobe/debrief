@@ -28,6 +28,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Strip cmd from coverage
+        run: grep -v '^github.com/cloudprobe/debrief/cmd/' coverage.out > coverage_filtered.out && mv coverage_filtered.out coverage.out
+
       - name: Upload coverage
         uses: coverallsapp/github-action@v2
         with:
