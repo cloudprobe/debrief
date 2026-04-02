@@ -6,46 +6,13 @@
 [![Latest Release](https://img.shields.io/github/v/release/cloudprobe/debrief)](https://github.com/cloudprobe/debrief/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/cloudprobe/debrief)](LICENSE)
 
-Know what you actually did today -- git commits, AI sessions, one command.
+Know what you actually shipped today.
 
-## Install
-
-```sh
-brew install cloudprobe/tap/debrief
-```
-
-Or with Go:
-
-```sh
-go install github.com/cloudprobe/debrief/cmd/debrief@latest
-```
-
-## Usage
-
-```sh
-debrief standup            # today's standup
-debrief standup yesterday  # yesterday
-debrief standup week       # this week (per-day breakdown)
-debrief standup -d 2026-03-25  # specific date
-
-debrief cost               # today's estimated API cost
-debrief cost week          # this week with per-model breakdown
-
-debrief standup --project myapp  # filter to one project
-debrief cost --project myapp     # same filter on cost
-```
-
-## Setup
-
-```sh
-debrief init
-```
-
-Choose your Claude Code access type (direct API, Max/Pro, Vertex, Bedrock). Config is saved to `~/.config/debrief/config.yaml`.
-
-## Example output
+debrief reads your local git history and Claude Code sessions — no API calls, no logins, no cloud — and turns them into a standup summary or cost report in seconds.
 
 ```
+$ debrief standup week
+
 Week of Mar 31 -- Apr 6, 2026
 ──────────────────────────────
 
@@ -66,5 +33,71 @@ cloudprobe/debrief
   * Removed deprecated --from/--to flags
 
 ────────────────────────────────────────
-2 projects * 8 commits * active 2 of 7 days
+2 projects · 8 commits · active 2 of 7 days
+```
+
+- **No API calls** — reads `~/.claude/projects/` and git log locally, nothing leaves your machine
+- **Smart synthesis** — surfaces Claude's own session notes alongside signal commits, filters out chore/lint noise
+- **PR-aware** — automatically extracts GitHub PR links and GitLab MR references from commits
+- **Multi-source pricing** — supports direct API, Max/Pro, Vertex, and Bedrock with per-model cost breakdown
+
+## Install
+
+```sh
+brew install cloudprobe/tap/debrief
+```
+
+Or with Go:
+
+```sh
+go install github.com/cloudprobe/debrief/cmd/debrief@latest
+```
+
+## Setup
+
+```sh
+debrief init
+```
+
+Choose your Claude Code access type (direct API, Max/Pro, Vertex, Bedrock). Config is saved to `~/.config/debrief/config.yaml`.
+
+## Commands
+
+| Command | Args | Description |
+|---------|------|-------------|
+| `debrief init` | — | Interactive setup wizard |
+| `debrief standup` | `today` `yesterday` `week` `month` `-d YYYY-MM-DD` | Standup summary from commits + AI sessions |
+| `debrief cost` | `today` `yesterday` `week` `month` `-d YYYY-MM-DD` | Estimated API cost with per-model breakdown |
+| `debrief version` | — | Print version |
+
+**Flags:**
+
+| Flag | Commands | Description |
+|------|----------|-------------|
+| `--project`, `-p` | `standup`, `cost` | Filter to repos matching substring |
+| `--by-project` | `standup` | Group bullets under project name headers |
+| `--date`, `-d` | all | Override date (YYYY-MM-DD) |
+
+## Configuration
+
+`~/.config/debrief/config.yaml` (respects `$XDG_CONFIG_HOME`):
+
+```yaml
+git_repo_paths:
+  - ~/work
+  - ~/projects
+  - ~/code
+git_discovery_depth: 2        # how deep to scan for git repos
+
+pricing:
+  preset: direct              # direct | max | vertex | bedrock
+  overrides:
+    claude-opus-4-5:
+      input_per_million: 15.0
+      output_per_million: 75.0
+
+# optional overrides for AI session paths
+claude_dir: ~/.claude/projects
+codex_dir: ~/.codex/sessions
+gemini_dir: ~/.gemini/tmp
 ```
