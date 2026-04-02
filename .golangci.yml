@@ -1,0 +1,26 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - gocritic
+    - gosec
+    - goconst
+    - unparam
+    - bodyclose
+    - misspell
+  settings:
+    gosec:
+      excludes:
+        - G304  # file path as taint input — acceptable for a CLI reading local files
+        - G204  # subprocess with variable args — all callers use fixed "git" binary
+        - G301  # directory permissions 0755 — acceptable in test helpers
+        - G306  # file permissions 0644 — acceptable in test helpers
+
+formatters:
+  enable:
+    - gofmt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

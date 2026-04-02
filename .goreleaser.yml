@@ -1,0 +1,50 @@
+version: 2
+
+builds:
+  - main: ./cmd/debrief
+    binary: debrief
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+# brews is deprecated in goreleaser v2 but homebrew_casks is for GUI apps,
+# not CLI binaries. brews still works and is the correct choice here.
+brews:
+  - repository:
+      owner: cloudprobe
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/cloudprobe/debrief
+    description: Know what you actually did today — git commits, AI sessions, one command
+    license: MIT
+    install: |
+      bin.install "debrief"
+    test: |
+      assert_match "debrief", shell_output("#{bin}/debrief --version")
