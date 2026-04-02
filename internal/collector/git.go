@@ -40,13 +40,11 @@ func (g *GitCollector) Collect(dr model.DateRange) ([]model.Activity, error) {
 
 	var all []model.Activity
 	for _, repo := range repos {
-		a, err := g.collectRepo(repo, dr, author)
+		activities, err := g.collectRepo(repo, dr, author)
 		if err != nil {
 			continue
 		}
-		if a != nil {
-			all = append(all, *a)
-		}
+		all = append(all, activities...)
 	}
 	return all, nil
 }
@@ -109,8 +107,19 @@ func (g *GitCollector) resolveAuthor() string {
 	return strings.TrimSpace(string(out))
 }
 
-// collectRepo extracts commit activity from a single git repo.
-func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author string) (*model.Activity, error) {
+// dayGroup accumulates commits for a single calendar day in a repo.
+type dayGroup struct {
+	earliest   time.Time
+	latest     time.Time
+	messages   []string
+	insertions int
+	deletions  int
+}
+
+// collectRepo extracts commit activity from a single git repo, returning one
+// Activity per calendar day so that SplitByDay can assign commits to their
+// actual day without cross-day leakage.
+func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author string) ([]model.Activity, error) {
 	// Format: hash|author_email|timestamp|subject
 	args := []string{
 		"-C", repoPath,
@@ -137,13 +146,11 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 	}
 
 	project := repoSlug(repoPath)
-	var commits int
-	var messages []string
-	var earliest, latest time.Time
-	var totalInsertions, totalDeletions int
-
-	// Get current branch.
 	branch := getCurrentBranch(repoPath)
+
+	// Group commits by local calendar day so each day gets its own Activity.
+	byDay := make(map[string]*dayGroup)
+	var dayOrder []string // preserve insertion order for stable output
 
 	for _, line := range lines {
 		parts := strings.SplitN(line, "|", 4)
@@ -157,38 +164,47 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 			continue
 		}
 		t := time.Unix(ts, 0)
+		key := t.Local().Format("2006-01-02")
 
-		if earliest.IsZero() || t.Before(earliest) {
-			earliest = t
+		dg, ok := byDay[key]
+		if !ok {
+			dg = &dayGroup{earliest: t, latest: t}
+			byDay[key] = dg
+			dayOrder = append(dayOrder, key)
 		}
-		if latest.IsZero() || t.After(latest) {
-			latest = t
+		if t.Before(dg.earliest) {
+			dg.earliest = t
 		}
+		if t.After(dg.latest) {
+			dg.latest = t
+		}
+		dg.messages = append(dg.messages, parts[3])
 
-		commits++
-		messages = append(messages, parts[3])
-
-		// Get diff stats for this commit.
 		ins, del := commitDiffStats(repoPath, hash)
-		totalInsertions += ins
-		totalDeletions += del
+		dg.insertions += ins
+		dg.deletions += del
 	}
 
-	if commits == 0 {
+	if len(byDay) == 0 {
 		return nil, nil
 	}
 
-	return &model.Activity{
-		Source:         "git",
-		Timestamp:      earliest,
-		EndTime:        latest,
-		Project:        project,
-		Branch:         branch,
-		CommitCount:    commits,
-		CommitMessages: messages,
-		Insertions:     totalInsertions,
-		Deletions:      totalDeletions,
-	}, nil
+	activities := make([]model.Activity, 0, len(dayOrder))
+	for _, key := range dayOrder {
+		dg := byDay[key]
+		activities = append(activities, model.Activity{
+			Source:         "git",
+			Timestamp:      dg.earliest,
+			EndTime:        dg.latest,
+			Project:        project,
+			Branch:         branch,
+			CommitCount:    len(dg.messages),
+			CommitMessages: dg.messages,
+			Insertions:     dg.insertions,
+			Deletions:      dg.deletions,
+		})
+	}
+	return activities, nil
 }
 
 // commitDiffStats returns insertions and deletions for a single commit.
