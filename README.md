@@ -1,5 +1,11 @@
 # debrief
 
+[![CI](https://github.com/cloudprobe/debrief/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudprobe/debrief/actions/workflows/ci.yml)
+[![Coverage](https://coveralls.io/repos/github/cloudprobe/debrief/badge.svg?branch=main)](https://coveralls.io/github/cloudprobe/debrief?branch=main)
+[![Go Report Card](https://goreportcard.com/badge/github.com/cloudprobe/debrief)](https://goreportcard.com/report/github.com/cloudprobe/debrief)
+[![Latest Release](https://img.shields.io/github/v/release/cloudprobe/debrief)](https://github.com/cloudprobe/debrief/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/cloudprobe/debrief)](LICENSE)
+
 Know what you actually did today -- git commits, AI sessions, one command.
 
 ## Install
