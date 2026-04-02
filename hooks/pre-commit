@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+STAGED_SH=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(sh|bash)$' || true)
+STAGED_TF=$(git diff --cached --name-only --diff-filter=ACM | grep '\.tf$' || true)
+
+FAILED=0
+
+if [[ -n "$STAGED_GO" ]]; then
+  echo "→ golangci-lint"
+  if ! golangci-lint run ./...; then
+    FAILED=1
+  fi
+fi
+
+if [[ -n "$STAGED_SH" ]]; then
+  echo "→ shellcheck"
+  # shellcheck disable=SC2086
+  if ! shellcheck $STAGED_SH; then
+    FAILED=1
+  fi
+fi
+
+if [[ -n "$STAGED_TF" ]]; then
+  echo "→ terraform fmt"
+  # shellcheck disable=SC2086
+  if ! terraform fmt -check $STAGED_TF; then
+    echo "  run 'terraform fmt' to fix"
+    FAILED=1
+  fi
+fi
+
+exit "$FAILED"
