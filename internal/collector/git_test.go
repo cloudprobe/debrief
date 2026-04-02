@@ -168,7 +168,9 @@ func TestGitCollector_MultiDayCommitsSplitByDay(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(baseEnv, "add", ".")
-	day1Env := append(baseEnv,
+	day1Env := make([]string, len(baseEnv), len(baseEnv)+2)
+	copy(day1Env, baseEnv)
+	day1Env = append(day1Env,
 		"GIT_AUTHOR_DATE="+day1.Format(time.RFC3339),
 		"GIT_COMMITTER_DATE="+day1.Format(time.RFC3339),
 	)
@@ -179,7 +181,9 @@ func TestGitCollector_MultiDayCommitsSplitByDay(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(baseEnv, "add", ".")
-	day2Env := append(baseEnv,
+	day2Env := make([]string, len(baseEnv), len(baseEnv)+2)
+	copy(day2Env, baseEnv)
+	day2Env = append(day2Env,
 		"GIT_AUTHOR_DATE="+day2.Format(time.RFC3339),
 		"GIT_COMMITTER_DATE="+day2.Format(time.RFC3339),
 	)
