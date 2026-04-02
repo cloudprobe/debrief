@@ -79,7 +79,7 @@ func TestRenderCostTable(t *testing.T) {
 					Date:      time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 					TotalCost: 0,
 					Activities: []model.Activity{
-						{Project: "cloudprobe/devrecap", Source: "git"},
+						{Project: "cloudprobe/debrief", Source: "git"},
 					},
 					ByModel: map[string]model.ModelSummary{},
 				},
