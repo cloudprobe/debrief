@@ -1,7 +1,7 @@
 # debrief
 
 [![CI](https://github.com/cloudprobe/debrief/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudprobe/debrief/actions/workflows/ci.yml)
-[![Coverage](https://coveralls.io/repos/github/cloudprobe/debrief/badge.svg?branch=main)](https://coveralls.io/github/cloudprobe/debrief?branch=main)
+[![Coverage](https://coveralls.io/repos/github/cloudprobe/debrief/badge.svg?branch=main&t=1)](https://coveralls.io/github/cloudprobe/debrief?branch=main)
 [![Go Report Card](https://goreportcard.com/badge/github.com/cloudprobe/debrief)](https://goreportcard.com/report/github.com/cloudprobe/debrief)
 [![Latest Release](https://img.shields.io/github/v/release/cloudprobe/debrief)](https://github.com/cloudprobe/debrief/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/cloudprobe/debrief)](LICENSE)
