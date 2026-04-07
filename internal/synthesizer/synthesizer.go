@@ -108,6 +108,84 @@ func renderDayFlat(b *strings.Builder, day model.DaySummary) {
 		for _, bullet := range bulletsForProject(p) {
 			fmt.Fprintf(b, "  \u2022 %s\n", bullet)
 		}
+		if links := ui.ExtractPRLinks(p.CommitMessages); len(links) > 0 {
+			fmt.Fprintf(b, "  PRs: %s\n", strings.Join(links, "  "))
+		}
+	}
+}
+
+// SynthesizeSlack produces a Slack-formatted standup summary from one or more
+// day summaries. Always groups by project with bold Slack headers.
+// totalDays is used for the period summary line (pass 0 to default to len(days)).
+func SynthesizeSlack(days []model.DaySummary, totalDays int) string {
+	var b strings.Builder
+
+	renderedCount := 0
+	for _, day := range days {
+		var dayBuf strings.Builder
+		renderDaySlack(&dayBuf, day)
+		if dayBuf.Len() > 0 {
+			if renderedCount > 0 {
+				b.WriteString("\n")
+			}
+			fmt.Fprintf(&b, "*%s*\n\n", day.Date.Format("2006-01-02"))
+			b.WriteString(dayBuf.String())
+			renderedCount++
+		}
+	}
+
+	if len(days) > 1 {
+		td := totalDays
+		if td <= 0 {
+			td = len(days)
+		}
+		projectSet := make(map[string]bool)
+		var totalCommits int
+		activeDays := 0
+		for _, day := range days {
+			if len(day.ByProject) > 0 {
+				activeDays++
+				for k, p := range day.ByProject {
+					projectSet[k] = true
+					totalCommits += p.CommitCount
+				}
+			}
+		}
+		b.WriteString("\n")
+		fmt.Fprintf(&b, "%d projects \u2022 %d commits \u2022 active %d of %d days\n",
+			len(projectSet), totalCommits, activeDays, td)
+	}
+
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		return "No activity to report.\n"
+	}
+	return out + "\n"
+}
+
+// renderDaySlack renders a single day's projects in Slack bold format.
+func renderDaySlack(b *strings.Builder, day model.DaySummary) {
+	if len(day.Activities) == 0 {
+		return
+	}
+	projects := sortedProjects(day.ByProject)
+	any := false
+	for _, p := range projects {
+		bullets := bulletsForProject(p)
+		if len(bullets) == 0 {
+			continue
+		}
+		if any {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(b, "*%s*\n", p.Name)
+		for _, bullet := range bullets {
+			fmt.Fprintf(b, "- %s\n", bullet)
+		}
+		if links := ui.ExtractPRLinks(p.CommitMessages); len(links) > 0 {
+			fmt.Fprintf(b, "PRs: %s\n", strings.Join(links, " "))
+		}
+		any = true
 	}
 }
 
