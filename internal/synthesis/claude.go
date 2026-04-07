@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -70,6 +72,13 @@ type claudeExecutor struct {
 }
 
 func newClaudeExecutor() (*claudeExecutor, error) {
+	bin := os.Getenv("DEBRIEF_CLAUDE_BIN")
+	if bin != "" {
+		if !filepath.IsAbs(bin) {
+			return nil, fmt.Errorf("DEBRIEF_CLAUDE_BIN must be an absolute path, got: %q", bin)
+		}
+		return &claudeExecutor{bin: bin}, nil
+	}
 	bin, err := exec.LookPath("claude")
 	if err != nil {
 		return nil, ErrNoClaude
@@ -84,7 +93,15 @@ func (e *claudeExecutor) Run(ctx context.Context, stdin string) (string, error) 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+		if ctx.Err() != nil {
+			return "", ctx.Err() // return unwrapped so errors.Is works at call site
+		}
+		stderrStr := strings.TrimSpace(stderr.String())
+		const maxStderrLen = 200
+		if len(stderrStr) > maxStderrLen {
+			stderrStr = stderrStr[:maxStderrLen] + "...[truncated]"
+		}
+		return "", fmt.Errorf("%w (stderr: %s)", err, stderrStr)
 	}
 	return stdout.String(), nil
 }

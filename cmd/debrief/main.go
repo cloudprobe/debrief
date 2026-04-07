@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 	"github.com/cloudprobe/debrief/internal/aggregator"
 	"github.com/cloudprobe/debrief/internal/clipboard"
 	"github.com/cloudprobe/debrief/internal/collector"
@@ -264,14 +263,16 @@ func runStandup(dr model.DateRange, header string, projectFilter string, byProje
 		body = synthesizer.SynthesizeSlack(days, totalDays)
 	} else {
 		if !noAI {
-			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-			defer cancel()
-			out, err := synthesis.Synthesize(ctx, days, totalDays, header, synthesis.Options{})
+			out, err := synthesis.Synthesize(context.Background(), days, totalDays, header, synthesis.Options{})
 			switch {
 			case err == nil:
 				body = out
 			case errors.Is(err, synthesis.ErrNoClaude):
 				fmt.Fprintln(os.Stderr, "note: claude not found in PATH — using heuristic output")
+			case errors.Is(err, synthesis.ErrEmptyOutput):
+				fmt.Fprintln(os.Stderr, "note: claude returned empty output — using heuristic output")
+			case errors.Is(err, context.DeadlineExceeded):
+				fmt.Fprintln(os.Stderr, "note: claude synthesis timed out — using heuristic output")
 			default:
 				fmt.Fprintf(os.Stderr, "note: claude synthesis failed (%v) — using heuristic output\n", err)
 			}

@@ -117,4 +117,7 @@ func TestSynthesize_Timeout(t *testing.T) {
 	if !strings.Contains(err.Error(), "synthesis failed") {
 		t.Errorf("expected 'synthesis failed' in error, got: %v", err)
 	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected DeadlineExceeded in error chain, got: %v", err)
+	}
 }

@@ -32,11 +32,27 @@ type truncLevel int
 
 const maxTruncLevel truncLevel = 5
 
+// sanitizeForPrompt prevents user-controlled strings from injecting LLM instructions.
+// It collapses newlines (the primary injection vector) and trims whitespace.
+func sanitizeForPrompt(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.TrimSpace(s)
+}
+
+// Truncation levels (spec order):
+//
+//	Level 0: everything included
+//	Level 1: drop tools: lines
+//	Level 2: cap commit_messages at 5 per project
+//	Level 3: cap session_notes at 3 per project
+//	Level 4: drop files_created/files_modified
+//	Level 5: cap projects to top 3 by score
 func renderPayload(days []model.DaySummary, totalDays int, dateLabel string, lvl truncLevel) string {
 	var b strings.Builder
 
 	if dateLabel != "" {
-		fmt.Fprintf(&b, "period: %s\n", dateLabel)
+		fmt.Fprintf(&b, "period: %s\n", sanitizeForPrompt(dateLabel))
 	}
 	if totalDays > 1 {
 		fmt.Fprintf(&b, "total_days_in_range: %d\n", totalDays)
@@ -46,23 +62,28 @@ func renderPayload(days []model.DaySummary, totalDays int, dateLabel string, lvl
 	for _, day := range days {
 		fmt.Fprintf(&b, "=== %s ===\n", day.Date.Format("2006-01-02 (Monday)"))
 
-		// Cost summary for the day
+		// Cost summary for the day — compute percentage share per model.
 		var totalCost float64
-		var modelParts []string
+		modelCosts := make(map[string]float64)
 		for mdl, ms := range day.ByModel {
 			totalCost += ms.TotalCost
-			modelParts = append(modelParts, fmt.Sprintf("%s %.0f%%", mdl, ms.TotalCost))
+			modelCosts[mdl] = ms.TotalCost
 		}
 		if totalCost > 0 {
 			fmt.Fprintf(&b, "total_cost_usd: %.2f\n", totalCost)
-			if lvl < 3 && len(modelParts) > 0 {
+			if lvl < 3 {
+				var modelParts []string
+				for mdl, cost := range modelCosts {
+					pct := cost / totalCost * 100
+					modelParts = append(modelParts, fmt.Sprintf("%s %.0f%%", sanitizeForPrompt(mdl), pct))
+				}
 				sort.Strings(modelParts)
 				fmt.Fprintf(&b, "model_mix: %s\n", strings.Join(modelParts, ", "))
 			}
 		}
 		fmt.Fprintln(&b)
 
-		// Sort projects by activity score descending
+		// Sort projects by activity score descending.
 		type scored struct {
 			name    string
 			summary model.ProjectSummary
@@ -75,17 +96,18 @@ func renderPayload(days []model.DaySummary, totalDays int, dateLabel string, lvl
 		}
 		sort.Slice(projects, func(i, j int) bool { return projects[i].score > projects[j].score })
 
-		// At higher truncation levels, drop low-activity projects
+		// Level 5: cap projects to top 3 by score (drop low-activity ones).
 		maxProjects := len(projects)
 		if lvl >= 4 && maxProjects > 3 {
 			maxProjects = 3
-		} else if lvl >= 5 && maxProjects > 1 {
+		}
+		if lvl >= 5 && maxProjects > 1 {
 			maxProjects = 1
 		}
 
 		for _, p := range projects[:maxProjects] {
 			ps := p.summary
-			fmt.Fprintf(&b, "project: %s\n", p.name)
+			fmt.Fprintf(&b, "project: %s\n", sanitizeForPrompt(p.name))
 
 			if ps.CommitCount > 0 {
 				fmt.Fprintf(&b, "  commits: %d\n", ps.CommitCount)
@@ -97,50 +119,55 @@ func renderPayload(days []model.DaySummary, totalDays int, dateLabel string, lvl
 				fmt.Fprintf(&b, "  claude_interactions: %d\n", ps.Interactions)
 			}
 
-			// Session notes — truncate at higher levels
+			// Level 3: cap session_notes at 3 per project.
 			notes := ps.SessionNotes
 			maxNotes := len(notes)
-			if lvl >= 2 && maxNotes > 3 {
+			if lvl >= 3 && maxNotes > 3 {
 				maxNotes = 3
 			}
 			if len(notes[:maxNotes]) > 0 {
 				fmt.Fprintln(&b, "  session_notes:")
 				for _, n := range notes[:maxNotes] {
-					fmt.Fprintf(&b, "    - %s\n", n)
+					fmt.Fprintf(&b, "    - %s\n", sanitizeForPrompt(n))
 				}
 			}
 
-			// Commit messages — truncate at higher levels
+			// Level 2: cap commit_messages at 5 per project.
 			msgs := ps.CommitMessages
 			maxMsgs := len(msgs)
-			if lvl >= 1 && maxMsgs > 5 {
+			if lvl >= 2 && maxMsgs > 5 {
 				maxMsgs = 5
-			}
-			if lvl >= 3 && maxMsgs > 3 {
-				maxMsgs = 3
 			}
 			if len(msgs[:maxMsgs]) > 0 {
 				fmt.Fprintln(&b, "  commit_messages:")
 				for _, m := range msgs[:maxMsgs] {
-					fmt.Fprintf(&b, "    - %s\n", m)
+					fmt.Fprintf(&b, "    - %s\n", sanitizeForPrompt(m))
 				}
 			}
 
-			// Files — drop at higher levels
-			if lvl < 3 {
+			// Level 4: drop files_created/files_modified.
+			if lvl < 4 {
 				if len(ps.FilesCreated) > 0 {
-					fmt.Fprintf(&b, "  files_created: %s\n", strings.Join(ps.FilesCreated, ", "))
+					sanitized := make([]string, len(ps.FilesCreated))
+					for i, f := range ps.FilesCreated {
+						sanitized[i] = sanitizeForPrompt(f)
+					}
+					fmt.Fprintf(&b, "  files_created: %s\n", strings.Join(sanitized, ", "))
 				}
 				if len(ps.FilesModified) > 0 {
-					fmt.Fprintf(&b, "  files_modified: %s\n", strings.Join(ps.FilesModified, ", "))
+					sanitized := make([]string, len(ps.FilesModified))
+					for i, f := range ps.FilesModified {
+						sanitized[i] = sanitizeForPrompt(f)
+					}
+					fmt.Fprintf(&b, "  files_modified: %s\n", strings.Join(sanitized, ", "))
 				}
 			}
 
-			// Tool breakdown — drop at level 1+
+			// Level 1: drop tools: lines.
 			if lvl < 1 && len(ps.ToolBreakdown) > 0 {
 				var tools []string
 				for t, c := range ps.ToolBreakdown {
-					tools = append(tools, fmt.Sprintf("%s=%d", t, c))
+					tools = append(tools, fmt.Sprintf("%s=%d", sanitizeForPrompt(t), c))
 				}
 				sort.Strings(tools)
 				fmt.Fprintf(&b, "  tools: %s\n", strings.Join(tools, " "))
