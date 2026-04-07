@@ -152,6 +152,7 @@ func SynthesizeSlack(days []model.DaySummary, totalDays int) string {
 			}
 		}
 		b.WriteString("\n")
+		b.WriteString("\n")
 		fmt.Fprintf(&b, "%d projects \u2022 %d commits \u2022 active %d of %d days\n",
 			len(projectSet), totalCommits, activeDays, td)
 	}
@@ -178,6 +179,7 @@ func renderDaySlack(b *strings.Builder, day model.DaySummary) {
 		if any {
 			b.WriteString("\n")
 		}
+		any = true
 		fmt.Fprintf(b, "*%s*\n", p.Name)
 		for _, bullet := range bullets {
 			fmt.Fprintf(b, "- %s\n", bullet)
@@ -185,7 +187,6 @@ func renderDaySlack(b *strings.Builder, day model.DaySummary) {
 		if links := ui.ExtractPRLinks(p.CommitMessages); len(links) > 0 {
 			fmt.Fprintf(b, "PRs: %s\n", strings.Join(links, " "))
 		}
-		any = true
 	}
 }
 

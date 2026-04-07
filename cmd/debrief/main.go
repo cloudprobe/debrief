@@ -124,7 +124,7 @@ func standupCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&projectFilter, "project", "p", "", "filter to projects matching name")
-	cmd.Flags().BoolVar(&byProject, "by-project", false, "group bullets under project headers")
+	cmd.Flags().BoolVar(&byProject, "by-project", false, "group output by project (default when --format slack)")
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "output format: text or slack")
 	cmd.Flags().BoolVar(&copyOut, "copy", false, "copy output to clipboard")
 	return cmd
@@ -267,8 +267,10 @@ func runStandup(dr model.DateRange, header string, projectFilter string, byProje
 
 	fmt.Print(body)
 	if copyOut {
-		if _, ok, _ := clipboard.Copy(body); ok {
-			fmt.Println("[copied to clipboard]")
+		if tool, ok, err := clipboard.Copy(body); ok {
+			fmt.Fprintln(os.Stderr, "[copied to clipboard]")
+		} else if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: clipboard copy failed (%s): %v\n", tool, err)
 		}
 	}
 	return nil

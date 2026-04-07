@@ -481,6 +481,20 @@ func TestSynthesizeSlack_MultiDay(t *testing.T) {
 	if !strings.Contains(got, "*2026-04-08*") {
 		t.Errorf("expected *2026-04-08* header, got:\n%s", got)
 	}
+	// Bullets appear under each day's project.
+	if !strings.Contains(got, "- Did thing A") {
+		t.Errorf("expected bullet 'Did thing A' under proj-a, got:\n%s", got)
+	}
+	if !strings.Contains(got, "- Did thing B") {
+		t.Errorf("expected bullet 'Did thing B' under proj-b, got:\n%s", got)
+	}
+	// Summary line appears for multi-day output.
+	if !strings.Contains(got, "projects") {
+		t.Errorf("expected 'projects' in summary line, got:\n%s", got)
+	}
+	if !strings.Contains(got, "active") {
+		t.Errorf("expected 'active' in summary line, got:\n%s", got)
+	}
 }
 
 func TestSynthesizeSlack_PRLinks(t *testing.T) {
