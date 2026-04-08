@@ -95,7 +95,7 @@ func TestRenderCostTable(t *testing.T) {
 			},
 		},
 		{
-			name: "single model day has subtotal row",
+			name: "single model day has no subtotal row",
 			days: []model.DaySummary{
 				{
 					Date:      time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
@@ -108,8 +108,8 @@ func TestRenderCostTable(t *testing.T) {
 			checks: []func(t *testing.T, got string){
 				func(t *testing.T, got string) {
 					t.Helper()
-					if !strings.Contains(got, "subtotal") {
-						t.Errorf("expected subtotal row in single-model day output:\n%s", got)
+					if strings.Contains(got, "subtotal") {
+						t.Errorf("single-model day should not have subtotal row:\n%s", got)
 					}
 					if !strings.Contains(got, "$0.50") {
 						t.Errorf("expected $0.50 in single-model day output:\n%s", got)
