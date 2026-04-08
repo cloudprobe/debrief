@@ -10,8 +10,8 @@ import (
 
 func TestJournalCollector_Name(t *testing.T) {
 	jc := NewJournalCollector(t.TempDir())
-	if jc.Name() != "journal" {
-		t.Errorf("Name() = %q, want %q", jc.Name(), "journal")
+	if jc.Name() != journalSource {
+		t.Errorf("Name() = %q, want %q", jc.Name(), journalSource)
 	}
 }
 
@@ -72,11 +72,11 @@ func TestJournalCollector_Collect_ReturnsEntries(t *testing.T) {
 		t.Fatalf("expected 1 activity, got %d", len(activities))
 	}
 	act := activities[0]
-	if act.Source != "journal" {
-		t.Errorf("Source = %q, want %q", act.Source, "journal")
+	if act.Source != journalSource {
+		t.Errorf("Source = %q, want %q", act.Source, journalSource)
 	}
-	if act.Project != "journal" {
-		t.Errorf("Project = %q, want %q", act.Project, "journal")
+	if act.Project != journalSource {
+		t.Errorf("Project = %q, want %q", act.Project, journalSource)
 	}
 	if len(act.SessionNotes) != 2 {
 		t.Errorf("SessionNotes len = %d, want 2", len(act.SessionNotes))
