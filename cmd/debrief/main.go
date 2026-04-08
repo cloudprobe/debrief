@@ -92,7 +92,6 @@ func initCmd() *cobra.Command {
 
 func standupCmd() *cobra.Command {
 	var projectFilter string
-	var byProject bool
 	var format string
 	var copyOut bool
 	cmd := &cobra.Command{
@@ -108,27 +107,26 @@ func standupCmd() *cobra.Command {
 			if len(args) > 0 {
 				switch args[0] {
 				case "today":
-					return runStandup(daterange.TodayRange(), "", projectFilter, byProject, format, copyOut)
+					return runStandup(daterange.TodayRange(), "", projectFilter, format, copyOut)
 				case "yesterday":
-					return runStandup(daterange.YesterdayRange(), "", projectFilter, byProject, format, copyOut)
+					return runStandup(daterange.YesterdayRange(), "", projectFilter, format, copyOut)
 				case argWeek:
 					dr := daterange.WeekRange()
 					sun := dr.Start.AddDate(0, 0, 6)
-					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, byProject, format, copyOut)
+					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, format, copyOut)
 				case "month":
 					dr := daterange.MonthRange()
-					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, byProject, format, copyOut)
+					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, format, copyOut)
 				}
 			}
 			dr, err := daterange.Resolve(date)
 			if err != nil {
 				return err
 			}
-			return runStandup(dr, "", projectFilter, byProject, format, copyOut)
+			return runStandup(dr, "", projectFilter, format, copyOut)
 		},
 	}
 	cmd.Flags().StringVarP(&projectFilter, "project", "p", "", "filter to projects matching name")
-	cmd.Flags().BoolVar(&byProject, "by-project", false, "group output by project (default when --format slack)")
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "output format: text or slack")
 	cmd.Flags().BoolVar(&copyOut, "copy", false, "copy output to clipboard")
 	return cmd
@@ -239,7 +237,7 @@ func runInit() error {
 	return nil
 }
 
-func runStandup(dr model.DateRange, header string, projectFilter string, byProject bool, format string, copyOut bool) error {
+func runStandup(dr model.DateRange, header string, projectFilter string, format string, copyOut bool) error {
 	cfg := config.Load()
 	allActivities := collectActivities(cfg, dr, false)
 	days := daterange.SplitByDay(allActivities, dr, aggregator.Aggregate)
