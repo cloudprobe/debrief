@@ -161,13 +161,13 @@ func TestRenderCostTable_GrandTotalAccuracy(t *testing.T) {
 	if !strings.Contains(got, "$1.50") {
 		t.Errorf("expected day 1 subtotal $1.50 in output:\n%s", got)
 	}
-	// Day 2 subtotal = 2.00
+	// Day 2 model cost = 2.00 (single-model day, no separate subtotal row)
 	if !strings.Contains(got, "$2.00") {
-		t.Errorf("expected day 2 subtotal $2.00 in output:\n%s", got)
+		t.Errorf("expected day 2 model cost $2.00 in output:\n%s", got)
 	}
-	// Day 3 subtotal = 0.25
+	// Day 3 model cost = 0.25 (single-model day, no separate subtotal row)
 	if !strings.Contains(got, "$0.25") {
-		t.Errorf("expected day 3 subtotal $0.25 in output:\n%s", got)
+		t.Errorf("expected day 3 model cost $0.25 in output:\n%s", got)
 	}
 	// Each date should appear in the output
 	for _, date := range []string{"2026-04-01", "2026-04-02", "2026-04-03"} {

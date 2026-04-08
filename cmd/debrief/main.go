@@ -249,15 +249,11 @@ func runStandup(dr model.DateRange, header string, projectFilter string, format 
 		}
 		fmt.Printf("Showing: projects matching %q\n\n", projectFilter)
 	}
-	// Compute total calendar days in the period for period summary.
-	totalDays := int(dr.End.Sub(dr.Start).Hours()/24) + 1
-	if totalDays < 1 {
-		totalDays = 1
-	}
-
-	body := synthesizer.SynthesizeSmart(days, totalDays, header, format == "slack")
-	if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
+	body := synthesizer.SynthesizeSmart(days, header, format == "slack")
+	if body != synthesizer.NoActivity {
+		if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
+		}
 	}
 
 	fmt.Print(body)

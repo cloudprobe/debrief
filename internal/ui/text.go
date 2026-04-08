@@ -13,8 +13,9 @@ import (
 const noCostData = "No cost data for this period.\n"
 
 // RenderCostTable produces a box-drawing table with Date | Model | Cost (USD) columns.
-// Each day group shows per-model rows sorted alphabetically, a subtotal row, and a grand total.
-// Days with empty ByModel are skipped entirely (git-only days).
+// Each day group shows per-model rows sorted alphabetically and a subtotal row (omitted when
+// there is only one model for the day). Zero-cost models and days are skipped entirely.
+// A grand total row is appended when there are multiple days.
 func RenderCostTable(days []model.DaySummary) string {
 	if len(days) == 0 {
 		return noCostData

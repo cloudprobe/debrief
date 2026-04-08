@@ -144,7 +144,7 @@ func TestSynthesizeSmart(t *testing.T) {
 				CommitCount:    1,
 			},
 		})
-		got := SynthesizeSmart([]model.DaySummary{day}, 1, "", false)
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
 		if !strings.Contains(got, "Add login page") {
 			t.Errorf("expected 'Add login page' in output, got:\n%s", got)
 		}
@@ -158,7 +158,7 @@ func TestSynthesizeSmart(t *testing.T) {
 				CommitCount:    1,
 			},
 		})
-		got := SynthesizeSmart([]model.DaySummary{day}, 1, "", false)
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
 		if strings.Contains(got, "bump deps") || strings.Contains(got, "Bump deps") {
 			t.Errorf("chore commit should not appear, got:\n%s", got)
 		}
@@ -171,7 +171,7 @@ func TestSynthesizeSmart(t *testing.T) {
 				SessionNotes: []string{"Decided to use gRPC instead of REST for the internal service calls"},
 			},
 		})
-		got := SynthesizeSmart([]model.DaySummary{day}, 1, "", false)
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
 		if !strings.Contains(got, "gRPC instead of REST") {
 			t.Errorf("expected decided note in output, got:\n%s", got)
 		}
@@ -181,16 +181,16 @@ func TestSynthesizeSmart(t *testing.T) {
 		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
 			"myproject": {
 				Name:         "myproject",
-				SessionNotes: []string{"Fixed. a1b2c3d."},
+				SessionNotes: []string{"Completed the refactor and pushed commit a1b2c3d to the main branch."},
 			},
 		})
-		got := SynthesizeSmart([]model.DaySummary{day}, 1, "", false)
-		if strings.Contains(got, "Fixed. a1b2c3d") {
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if strings.Contains(got, "a1b2c3d") {
 			t.Errorf("note with bare hash should not appear, got:\n%s", got)
 		}
 	})
 
-	t.Run("multi-day with dateLabel is flat, no per-day headers, has summary line", func(t *testing.T) {
+	t.Run("multi-day with dateLabel is flat, no per-day headers, no summary line", func(t *testing.T) {
 		days := []model.DaySummary{
 			makeDay(time.Date(2026, 4, 6, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
 				"proj-a": {Name: "proj-a", CommitMessages: []string{"feat: add search"}, CommitCount: 1},
@@ -199,7 +199,7 @@ func TestSynthesizeSmart(t *testing.T) {
 				"proj-b": {Name: "proj-b", CommitMessages: []string{"fix: resolve panic"}, CommitCount: 1},
 			}),
 		}
-		got := SynthesizeSmart(days, 2, "Week of Apr 6", false)
+		got := SynthesizeSmart(days, "Week of Apr 6", false)
 		if !strings.Contains(got, "Week of Apr 6") {
 			t.Errorf("expected dateLabel header, got:\n%s", got)
 		}
@@ -221,7 +221,7 @@ func TestSynthesizeSmart(t *testing.T) {
 				Interactions: 3,
 			},
 		})
-		got := SynthesizeSmart([]model.DaySummary{day}, 1, "", false)
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
 		if !strings.Contains(got, "Wed, Apr 8 2026") {
 			t.Errorf("expected single-day date header, got:\n%s", got)
 		}
@@ -231,7 +231,7 @@ func TestSynthesizeSmart(t *testing.T) {
 	})
 
 	t.Run("empty days returns noActivity", func(t *testing.T) {
-		got := SynthesizeSmart([]model.DaySummary{}, 0, "", false)
+		got := SynthesizeSmart([]model.DaySummary{}, "", false)
 		if got != noActivity {
 			t.Errorf("expected noActivity, got: %q", got)
 		}
@@ -246,7 +246,7 @@ func TestSynthesizeSmart(t *testing.T) {
 				CommitCount:    1,
 			},
 		})
-		got := SynthesizeSmart([]model.DaySummary{day}, 1, "", false)
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
 		count := strings.Count(got, "authentication")
 		if count > 1 {
 			t.Errorf("authentication should appear only once (note wins over commit), got:\n%s", got)
@@ -261,7 +261,7 @@ func TestSynthesizeSmart(t *testing.T) {
 				CommitCount:    1,
 			},
 		})
-		got := SynthesizeSmart([]model.DaySummary{day}, 1, "", true)
+		got := SynthesizeSmart([]model.DaySummary{day}, "", true)
 		if !strings.Contains(got, "`Wed, Apr 8 2026`") {
 			t.Errorf("slack mode: expected backtick date header, got:\n%s", got)
 		}

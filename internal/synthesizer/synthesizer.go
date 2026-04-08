@@ -14,8 +14,12 @@ import (
 
 var bareHashRe = regexp.MustCompile(`\b[0-9a-f]{7,}\b`)
 
+// NoActivity is the sentinel returned when there is nothing to report.
+// Callers can compare against this to avoid overwriting real saved state.
+const NoActivity = "No activity to report.\n"
+
 const (
-	noActivity     = "No activity to report.\n"
+	noActivity     = NoActivity
 	bucketShipped  = "shipped"
 	bucketSkip     = "skip"
 	bucketDecided  = "decided"
@@ -104,7 +108,7 @@ func dedup(notes []string) []string {
 // For single-day input it shows a date header; for multi-day (dateLabel non-empty)
 // it produces a flat rollup across all days.
 // If slack is true, the header is bold (*date*) and bullets use Slack's "- " prefix.
-func SynthesizeSmart(days []model.DaySummary, totalDays int, dateLabel string, slack bool) string {
+func SynthesizeSmart(days []model.DaySummary, dateLabel string, slack bool) string {
 	type bucket struct{ decided, shipped, investigated, risk []string }
 	var b bucket
 
@@ -190,16 +194,19 @@ func SynthesizeSmart(days []model.DaySummary, totalDays int, dateLabel string, s
 }
 
 // commitBucket classifies a commit message into a routing bucket.
-// Returns "shipped" to include the commit, "skip" to drop it.
+// Returns bucketShipped to include the commit, bucketSkip to drop it.
+// True merge commits (prefix "Merge pull request" / "Merge branch") are always
+// shipped. Squash commits with trailing "(#N)" still go through the conventional
+// prefix filter so chore/test are correctly skipped.
 func commitBucket(msg string) string {
-	// Detect merge/squash commits
-	if strings.HasPrefix(msg, "Merge") || strings.Contains(msg, " (#") {
+	// True merge commits — always include.
+	if strings.HasPrefix(msg, "Merge pull request") || strings.HasPrefix(msg, "Merge branch") {
 		return bucketShipped
 	}
 
 	colonIdx := strings.Index(msg, ":")
 	if colonIdx < 0 {
-		// No recognized prefix — include by default
+		// No conventional prefix — include by default.
 		return bucketShipped
 	}
 
