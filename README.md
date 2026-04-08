@@ -8,7 +8,7 @@
 
 Know what you actually shipped today.
 
-debrief reads your local git history and Claude Code sessions — no API calls, no logins, no cloud — and turns them into a standup summary or cost report in seconds.
+debrief reads your local git history and Claude Code sessions — no logins, no cloud — and turns them into a standup summary or cost report in seconds. An optional background update check may contact GitHub Releases; disable with `DEBRIEF_NO_UPDATE_CHECK=1`.
 
 ```
 $ debrief standup week
@@ -36,7 +36,7 @@ cloudprobe/debrief
 2 projects · 8 commits · active 2 of 7 days
 ```
 
-- **No API calls** — reads `~/.claude/projects/` and git log locally, nothing leaves your machine
+- **Local synthesis** — reads `~/.claude/projects/` and git log locally, your work never leaves your machine
 - **Smart synthesis** — surfaces Claude's own session notes alongside signal commits, filters out chore/lint noise
 - **PR-aware** — automatically extracts GitHub PR links and GitLab MR references from commits
 - **Multi-source pricing** — supports direct API, Max/Pro, Vertex, and Bedrock with per-model cost breakdown

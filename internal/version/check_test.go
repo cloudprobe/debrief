@@ -208,6 +208,19 @@ func TestCheckForUpdate_EmptyCacheDir(t *testing.T) {
 	_, _ = CheckForUpdate(dir, "v0.1.0")
 }
 
+func TestCheckForUpdate_EnvVarDisablesCheck(t *testing.T) {
+	t.Setenv("DEBRIEF_NO_UPDATE_CHECK", "1")
+
+	dir := t.TempDir()
+	// Write a cache that would normally report an update.
+	writeCache(t, dir, "v9.9.9", time.Now())
+
+	_, ok := CheckForUpdate(dir, "v0.1.0")
+	if ok {
+		t.Fatal("expected no update when DEBRIEF_NO_UPDATE_CHECK is set")
+	}
+}
+
 // writeCache writes a version cache file to dir with the given latest version and checked time.
 func writeCache(t *testing.T, dir, latestVersion string, checkedAt time.Time) {
 	t.Helper()

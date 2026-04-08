@@ -136,6 +136,7 @@ func standupCmd() *cobra.Command {
 
 func costCmd() *cobra.Command {
 	var projectFilter string
+	var copyOut bool
 	cmd := &cobra.Command{
 		Use:       "cost [today|yesterday|week|month]",
 		Short:     "Show estimated API costs",
@@ -146,13 +147,13 @@ func costCmd() *cobra.Command {
 			if len(args) > 0 {
 				switch args[0] {
 				case "today":
-					return runCost(daterange.TodayRange(), projectFilter)
+					return runCost(daterange.TodayRange(), projectFilter, copyOut)
 				case "yesterday":
-					return runCost(daterange.YesterdayRange(), projectFilter)
+					return runCost(daterange.YesterdayRange(), projectFilter, copyOut)
 				case argWeek:
-					return runCost(daterange.WeekRange(), projectFilter)
+					return runCost(daterange.WeekRange(), projectFilter, copyOut)
 				case "month":
-					return runCost(daterange.MonthRange(), projectFilter)
+					return runCost(daterange.MonthRange(), projectFilter, copyOut)
 				default:
 					return fmt.Errorf("unknown argument %q (allowed: today, yesterday, week, month)", args[0])
 				}
@@ -161,10 +162,11 @@ func costCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runCost(dr, projectFilter)
+			return runCost(dr, projectFilter, copyOut)
 		},
 	}
 	cmd.Flags().StringVarP(&projectFilter, "project", "p", "", "filter to projects matching name")
+	cmd.Flags().BoolVar(&copyOut, "copy", false, "copy output to clipboard")
 	return cmd
 }
 
@@ -271,7 +273,7 @@ func runStandup(dr model.DateRange, header string, projectFilter string, format 
 	return nil
 }
 
-func runCost(dr model.DateRange, projectFilter string) error {
+func runCost(dr model.DateRange, projectFilter string, copyOut bool) error {
 	cfg := config.Load()
 
 	preset := cfg.Pricing.Preset
@@ -295,7 +297,15 @@ func runCost(dr model.DateRange, projectFilter string) error {
 		}
 		fmt.Printf("Showing: projects matching %q\n\n", projectFilter)
 	}
-	fmt.Print(ui.RenderCostTable(days))
+	output := ui.RenderCostTable(days)
+	fmt.Print(output)
+	if copyOut {
+		if tool, ok, err := clipboard.Copy(output); ok {
+			fmt.Fprintln(os.Stderr, "[copied to clipboard]")
+		} else if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: clipboard copy failed (%s): %v\n", tool, err)
+		}
+	}
 	return nil
 }
 
@@ -372,6 +382,7 @@ func collectActivities(cfg config.Config, dr model.DateRange, costMode bool) []m
 	collectors := []collector.Collector{
 		collector.NewClaudeCollector(cfg.ClaudeDir, costMode, cfg.Pricing),
 		collector.NewGitCollector(cfg.GitRepoPaths, cfg.GitDiscoveryDepth),
+		collector.NewJournalCollector(config.ConfigDir()),
 	}
 	var all []model.Activity
 	for _, c := range collectors {
