@@ -117,6 +117,8 @@ func standupCmd() *cobra.Command {
 				case "month":
 					dr := daterange.MonthRange()
 					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, format, copyOut)
+				default:
+					return fmt.Errorf("unknown argument %q (allowed: today, yesterday, week, month)", args[0])
 				}
 			}
 			dr, err := daterange.Resolve(date)
@@ -151,6 +153,8 @@ func costCmd() *cobra.Command {
 					return runCost(daterange.WeekRange(), projectFilter)
 				case "month":
 					return runCost(daterange.MonthRange(), projectFilter)
+				default:
+					return fmt.Errorf("unknown argument %q (allowed: today, yesterday, week, month)", args[0])
 				}
 			}
 			dr, err := daterange.Resolve(date)
