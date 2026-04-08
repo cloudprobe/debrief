@@ -9,8 +9,10 @@ import (
 	"github.com/cloudprobe/debrief/internal/model"
 )
 
+const journalSource = "journal"
+
 // JournalCollector reads debrief log entries for the date range and
-// surfaces them as session notes under the "journal" pseudo-project.
+// surfaces them as session notes under the journalSource pseudo-project.
 type JournalCollector struct {
 	cfgDir string
 }
@@ -20,10 +22,10 @@ func NewJournalCollector(cfgDir string) *JournalCollector {
 	return &JournalCollector{cfgDir: cfgDir}
 }
 
-func (j *JournalCollector) Name() string { return "journal" }
+func (j *JournalCollector) Name() string { return journalSource }
 
 func (j *JournalCollector) Available() bool {
-	dir := filepath.Join(j.cfgDir, "journal")
+	dir := filepath.Join(j.cfgDir, journalSource)
 	_, err := os.Stat(dir)
 	return err == nil
 }
@@ -45,8 +47,8 @@ func (j *JournalCollector) Collect(dr model.DateRange) ([]model.Activity, error)
 			continue
 		}
 		activities = append(activities, model.Activity{
-			Source:       "journal",
-			Project:      "journal",
+			Source:       journalSource,
+			Project:      journalSource,
 			Timestamp:    time.Date(d.Year(), d.Month(), d.Day(), 12, 0, 0, 0, d.Location()),
 			SessionNotes: notes,
 		})
