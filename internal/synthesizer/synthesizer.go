@@ -14,7 +14,14 @@ import (
 
 var bareHashRe = regexp.MustCompile(`\b[0-9a-f]{7,}\b`)
 
-const noActivity = "No activity to report.\n"
+const (
+	noActivity     = "No activity to report.\n"
+	bucketShipped  = "shipped"
+	bucketSkip     = "skip"
+	bucketDecided  = "decided"
+	bucketInvestig = "investigated"
+	bucketRisk     = "risk"
+)
 
 // coveredByNotes checks if a commit message describes work already captured in notes.
 func coveredByNotes(commitMsg string, notes []string) bool {
@@ -114,11 +121,11 @@ func SynthesizeSmart(days []model.DaySummary, totalDays int, dateLabel string, s
 			// Classify notes into buckets
 			for _, note := range goodNotes {
 				switch noteBucket(note) {
-				case "decided":
+				case bucketDecided:
 					b.decided = append(b.decided, note)
-				case "investigated":
+				case bucketInvestig:
 					b.investigated = append(b.investigated, note)
-				case "risk":
+				case bucketRisk:
 					b.risk = append(b.risk, note)
 				default:
 					b.shipped = append(b.shipped, note)
@@ -127,7 +134,7 @@ func SynthesizeSmart(days []model.DaySummary, totalDays int, dateLabel string, s
 
 			// Classify commits; skip if covered by a note
 			for _, msg := range p.CommitMessages {
-				if commitBucket(msg) == "skip" {
+				if commitBucket(msg) == bucketSkip {
 					continue
 				}
 				stripped := stripPrefix(msg)
@@ -187,13 +194,13 @@ func SynthesizeSmart(days []model.DaySummary, totalDays int, dateLabel string, s
 func commitBucket(msg string) string {
 	// Detect merge/squash commits
 	if strings.HasPrefix(msg, "Merge") || strings.Contains(msg, " (#") {
-		return "shipped"
+		return bucketShipped
 	}
 
 	colonIdx := strings.Index(msg, ":")
 	if colonIdx < 0 {
 		// No recognized prefix — include by default
-		return "shipped"
+		return bucketShipped
 	}
 
 	prefix := strings.ToLower(msg[:colonIdx])
@@ -203,16 +210,16 @@ func commitBucket(msg string) string {
 
 	switch prefix {
 	case "feat", "fix", "perf", "refactor", "build", "ci":
-		return "shipped"
+		return bucketShipped
 	case "docs":
 		if len(stripPrefix(msg)) > 20 {
-			return "shipped"
+			return bucketShipped
 		}
-		return "skip"
+		return bucketSkip
 	case "chore", "test":
-		return "skip"
+		return bucketSkip
 	default:
-		return "shipped"
+		return bucketShipped
 	}
 }
 
@@ -230,10 +237,7 @@ func noteQuality(note string) bool {
 			return false
 		}
 	}
-	if note == "All the content." {
-		return false
-	}
-	return true
+	return note != "All the content."
 }
 
 // noteBucket classifies a surviving session note into a standup bucket.
@@ -241,20 +245,20 @@ func noteBucket(note string) string {
 	lower := strings.ToLower(note)
 	for _, kw := range []string{"decided", "went with", "chose", "switched to", "picked"} {
 		if strings.Contains(lower, kw) {
-			return "decided"
+			return bucketDecided
 		}
 	}
 	for _, kw := range []string{"found", "discovered", "ruled out", "investigated", "turns out"} {
 		if strings.Contains(lower, kw) {
-			return "investigated"
+			return bucketInvestig
 		}
 	}
 	for _, kw := range []string{"risk", "concern", "watch out"} {
 		if strings.Contains(lower, kw) {
-			return "risk"
+			return bucketRisk
 		}
 	}
-	return "shipped"
+	return bucketShipped
 }
 
 // sortedProjects returns projects sorted by activity volume.
