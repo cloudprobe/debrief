@@ -93,8 +93,8 @@ func TestBuildPayload_Empty(t *testing.T) {
 
 func TestBuildPayload_NeverExceedsMax(t *testing.T) {
 	cases := []struct {
-		name    string
-		days    []model.DaySummary
+		name     string
+		days     []model.DaySummary
 		maxBytes int
 	}{
 		{"single day", []model.DaySummary{dayFixture()}, 100},

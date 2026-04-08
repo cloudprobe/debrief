@@ -520,7 +520,7 @@ func TestSynthesizeSlack_PRLinks(t *testing.T) {
 
 func TestSynthesizeSlack_Empty(t *testing.T) {
 	got := SynthesizeSlack([]model.DaySummary{}, 0)
-	if got != "No activity to report.\n" {
+	if got != noActivity {
 		t.Errorf("expected 'No activity to report.\\n', got: %q", got)
 	}
 }

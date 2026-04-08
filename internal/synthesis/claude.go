@@ -27,9 +27,9 @@ type Executor interface {
 
 // Options configures Synthesize. Zero value uses defaults.
 type Options struct {
-	Timeout         time.Duration  // default 90s
-	MaxPayload      int            // default 50_000 bytes
-	Executor        Executor       // default: real claude -p
+	Timeout         time.Duration   // default 90s
+	MaxPayload      int             // default 50_000 bytes
+	Executor        Executor        // default: real claude -p
 	JournalEntries  []journal.Entry // from internal/journal
 	PreviousStandup string
 	PreviousDate    string

@@ -44,7 +44,11 @@ func Append(cfgDir string, t time.Time, msg string) error {
 	if err != nil {
 		return fmt.Errorf("opening journal file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	_, err = f.WriteString(bullet)
 	return err
 }

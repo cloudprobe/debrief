@@ -5,12 +5,10 @@ import (
 	"testing"
 )
 
+const pbcopyBin = "pbcopy"
+
 func notFound(string) (string, error) {
 	return "", errors.New("not found")
-}
-
-func found(string) (string, error) {
-	return "/usr/bin/tool", nil
 }
 
 func successRunner(bin string, args []string, stdin string) error {
@@ -30,13 +28,13 @@ func TestCopy_NoToolFound(t *testing.T) {
 
 func TestCopy_PbcopySuccess(t *testing.T) {
 	lookPath := func(bin string) (string, error) {
-		if bin == "pbcopy" {
+		if bin == pbcopyBin {
 			return "/usr/bin/pbcopy", nil
 		}
 		return "", errors.New("not found")
 	}
 	tool, ok, err := copyWith("hello", lookPath, successRunner)
-	if tool != "pbcopy" || !ok || err != nil {
+	if tool != pbcopyBin || !ok || err != nil {
 		t.Errorf("expected (\"pbcopy\", true, nil), got (%q, %v, %v)", tool, ok, err)
 	}
 }
@@ -69,13 +67,13 @@ func TestCopy_XclipFallback(t *testing.T) {
 
 func TestCopy_RunnerError(t *testing.T) {
 	lookPath := func(bin string) (string, error) {
-		if bin == "pbcopy" {
+		if bin == pbcopyBin {
 			return "/usr/bin/pbcopy", nil
 		}
 		return "", errors.New("not found")
 	}
 	tool, ok, err := copyWith("hello", lookPath, failRunner)
-	if tool != "pbcopy" || ok || err == nil {
+	if tool != pbcopyBin || ok || err == nil {
 		t.Errorf("expected (\"pbcopy\", false, err), got (%q, %v, %v)", tool, ok, err)
 	}
 }

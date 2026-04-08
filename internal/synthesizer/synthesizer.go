@@ -12,6 +12,8 @@ import (
 	"github.com/cloudprobe/debrief/internal/ui"
 )
 
+const noActivity = "No activity to report.\n"
+
 // Synthesize produces a standup summary from one or more day summaries.
 // totalDays is the number of calendar days in the requested period (used for
 // the period summary line on multi-day views). Pass 0 to default to len(days).
@@ -65,7 +67,7 @@ func Synthesize(days []model.DaySummary, totalDays int, byProject bool) string {
 
 	out := strings.TrimSpace(b.String())
 	if out == "" {
-		return "No activity to report.\n"
+		return noActivity
 	}
 	return out + "\n"
 }
@@ -159,7 +161,7 @@ func SynthesizeSlack(days []model.DaySummary, totalDays int) string {
 
 	out := strings.TrimSpace(b.String())
 	if out == "" {
-		return "No activity to report.\n"
+		return noActivity
 	}
 	return out + "\n"
 }
