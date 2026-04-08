@@ -35,9 +35,9 @@ func renderExtras(journalEntries []journal.Entry, previousStandup, previousDate 
 		}
 		combined := strings.Join(sanitized, "\n")
 		if len(combined) > maxPreviousStandupChars {
-			// Find the last valid UTF-8 boundary at or before the limit.
+			// Walk back from the byte limit to a rune-start boundary.
 			end := maxPreviousStandupChars
-			for end > 0 && !utf8.ValidString(combined[:end]) {
+			for end > 0 && !utf8.RuneStart(combined[end]) {
 				end--
 			}
 			combined = combined[:end] + "...[truncated]"
