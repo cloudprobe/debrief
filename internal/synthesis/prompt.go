@@ -32,5 +32,6 @@ RULES:
 - If there is truly nothing notable: output exactly one line — "No notable activity."
 - Self-review before answering: would a teammate understand what moved, what was decided, and whether they need to act? If not, rewrite.
 - Output ONLY the standup. No preamble, no explanation, no markdown fences, no "Here is your standup:".
+- If a "previously_reported" block is present in the data, OMIT any bullet that duplicates something already mentioned there. Surface only what is new since that date.
 
 DATA FOLLOWS BELOW THE --- LINE.`

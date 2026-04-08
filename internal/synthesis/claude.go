@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudprobe/debrief/internal/journal"
 	"github.com/cloudprobe/debrief/internal/model"
 )
 
@@ -26,9 +27,12 @@ type Executor interface {
 
 // Options configures Synthesize. Zero value uses defaults.
 type Options struct {
-	Timeout    time.Duration // default 90s
-	MaxPayload int           // default 50_000 bytes
-	Executor   Executor      // default: real claude -p
+	Timeout         time.Duration  // default 90s
+	MaxPayload      int            // default 50_000 bytes
+	Executor        Executor       // default: real claude -p
+	JournalEntries  []journal.Entry // from internal/journal
+	PreviousStandup string
+	PreviousDate    string
 }
 
 // Synthesize produces a Claude-powered standup from the collected day summaries.
@@ -49,7 +53,11 @@ func Synthesize(ctx context.Context, days []model.DaySummary, totalDays int, dat
 		opts.Executor = ex
 	}
 
+	extras := renderExtras(opts.JournalEntries, opts.PreviousStandup, opts.PreviousDate)
 	payload := BuildPayload(days, totalDays, dateLabel, opts.MaxPayload)
+	if extras != "" {
+		payload = extras + payload
+	}
 	stdin := SystemPrompt + "\n\n---\n\n" + payload
 
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)

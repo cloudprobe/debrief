@@ -10,6 +10,7 @@ import (
 	"github.com/cloudprobe/debrief/internal/collector"
 	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/daterange"
+	"github.com/cloudprobe/debrief/internal/journal"
 	"github.com/cloudprobe/debrief/internal/model"
 	"github.com/cloudprobe/debrief/internal/synthesis"
 	"github.com/cloudprobe/debrief/internal/synthesizer"
@@ -20,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const argWeek = "week"
@@ -71,6 +73,7 @@ Run "debrief <command> -help" for information on a specific command.`,
 	root.AddCommand(standupCmd())
 	root.AddCommand(costCmd())
 	root.AddCommand(versionCmd())
+	root.AddCommand(logCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -262,11 +265,29 @@ func runStandup(dr model.DateRange, header string, projectFilter string, byProje
 	if format == "slack" {
 		body = synthesizer.SynthesizeSlack(days, totalDays)
 	} else {
+		// Read journal entries for today
+		journalEntries, _ := journal.ReadEntries(config.ConfigDir(), time.Now())
+
+		// Read yesterday's standup
+		prevText, prevDate, _ := journal.ReadLastStandup(config.ConfigDir())
+		prevDateStr := ""
+		if !prevDate.IsZero() {
+			prevDateStr = prevDate.Format("2006-01-02")
+		}
+
 		if !noAI {
-			out, err := synthesis.Synthesize(context.Background(), days, totalDays, header, synthesis.Options{})
+			out, err := synthesis.Synthesize(context.Background(), days, totalDays, header, synthesis.Options{
+				JournalEntries:  journalEntries,
+				PreviousStandup: prevText,
+				PreviousDate:    prevDateStr,
+			})
 			switch {
 			case err == nil:
 				body = out
+				// Save successful standup
+				if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
+				}
 			case errors.Is(err, synthesis.ErrNoClaude):
 				fmt.Fprintln(os.Stderr, "note: claude not found in PATH — using heuristic output")
 			case errors.Is(err, synthesis.ErrEmptyOutput):
@@ -347,6 +368,52 @@ func filterDays(days []model.DaySummary, filter string) []model.DaySummary {
 		}
 	}
 	return result
+}
+
+func logCmd() *cobra.Command {
+	var list bool
+	cmd := &cobra.Command{
+		Use:     `log "message"`,
+		Short:   "Record a journal entry for today (decisions, blockers, notes)",
+		GroupID: "main",
+		Args:    cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg := config.Load()
+			if list {
+				return runLogList(cfg)
+			}
+			if len(args) == 0 {
+				return errors.New(`usage: debrief log "your message"  (or: debrief log --list)`)
+			}
+			return runLogAppend(cfg, strings.Join(args, " "))
+		},
+	}
+	cmd.Flags().BoolVar(&list, "list", false, "show today's journal entries")
+	return cmd
+}
+
+func runLogAppend(_ config.Config, msg string) error {
+	now := time.Now()
+	if err := journal.Append(config.ConfigDir(), now, msg); err != nil {
+		return fmt.Errorf("journal write failed: %w", err)
+	}
+	fmt.Printf("logged: [%s] %s\n", now.Format("15:04"), msg)
+	return nil
+}
+
+func runLogList(_ config.Config) error {
+	entries, err := journal.ReadEntries(config.ConfigDir(), time.Now())
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		fmt.Println("No journal entries for today.")
+		return nil
+	}
+	for _, e := range entries {
+		fmt.Printf("[%s] %s\n", e.Time, e.Message)
+	}
+	return nil
 }
 
 func collectActivities(cfg config.Config, dr model.DateRange, costMode bool) []model.Activity {
