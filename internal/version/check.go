@@ -37,6 +37,9 @@ type cache struct {
 // Returns (UpdateInfo{}, false) for any error, timeout, or up-to-date state.
 // Never panics, never blocks longer than httpTimeout.
 func CheckForUpdate(cacheDir, current string) (UpdateInfo, bool) {
+	if os.Getenv("DEBRIEF_NO_UPDATE_CHECK") != "" {
+		return UpdateInfo{}, false
+	}
 	cachePath := filepath.Join(cacheDir, cacheFile)
 
 	// Read existing cache.
