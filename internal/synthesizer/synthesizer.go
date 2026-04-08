@@ -200,7 +200,13 @@ func renderDaySlack(b *strings.Builder, day model.DaySummary) {
 // Signal commits supplement only when they cover work not already in the notes.
 // If there are no session notes, signal commits are the fallback.
 func bulletsForProject(p model.ProjectSummary) []string {
-	notes := dedup(p.SessionNotes)
+	var filtered []string
+	for _, n := range p.SessionNotes {
+		if noteQualityLight(n) {
+			filtered = append(filtered, n)
+		}
+	}
+	notes := dedup(filtered)
 
 	if len(notes) > 0 {
 		// Supplement with any signal commits not already described in the notes.
@@ -314,10 +320,12 @@ func dedup(notes []string) []string {
 	return out
 }
 
-// SynthesizeSmart produces a standup in Decided/Shipped/Investigated/Risk format
-// using local classification — no API calls. For single-day input it shows a day
-// header; for multi-day (dateLabel non-empty) it produces a flat rollup across all days.
-func SynthesizeSmart(days []model.DaySummary, totalDays int, dateLabel string) string {
+// SynthesizeSmart produces a flat standup using local classification — no API calls.
+// Bullets are ordered Decided → Shipped → Investigated → Risk with no section headers.
+// For single-day input it shows a date header; for multi-day (dateLabel non-empty)
+// it produces a flat rollup across all days.
+// If slack is true, the header is bold (*date*) and bullets use Slack's "- " prefix.
+func SynthesizeSmart(days []model.DaySummary, totalDays int, dateLabel string, slack bool) string {
 	type bucket struct{ decided, shipped, investigated, risk []string }
 	var b bucket
 
@@ -371,65 +379,34 @@ func SynthesizeSmart(days []model.DaySummary, totalDays int, dateLabel string) s
 
 	var sb strings.Builder
 
+	bulletPrefix := "  - "
+	if slack {
+		bulletPrefix = "- "
+	}
+
 	// Build header
 	isMultiDay := dateLabel != ""
 	if isMultiDay {
-		fmt.Fprintf(&sb, "%s\n\n", dateLabel)
-	} else {
-		// Single-day header: date — primaryProject
-		var headerLine string
-		if len(days) > 0 {
-			dateStr := days[0].Date.Format("Mon, Jan 2 2006")
-			projects := sortedProjects(days[0].ByProject)
-			if len(projects) > 0 {
-				headerLine = dateStr + " \u2014 " + projects[0].Name
-			} else {
-				headerLine = dateStr
-			}
+		if slack {
+			fmt.Fprintf(&sb, "`%s`\n\n", dateLabel)
+		} else {
+			fmt.Fprintf(&sb, "%s\n\n", dateLabel)
 		}
-		if headerLine != "" {
-			fmt.Fprintf(&sb, "%s\n\n", headerLine)
+	} else if len(days) > 0 {
+		dateStr := days[0].Date.Format("Mon, Jan 2 2006")
+		if slack {
+			fmt.Fprintf(&sb, "`%s`\n\n", dateStr)
+		} else {
+			fmt.Fprintf(&sb, "%s\n\n", dateStr)
 		}
 	}
 
-	// Render sections
-	renderSection := func(title string, items []string) {
-		if len(items) == 0 {
-			return
-		}
-		fmt.Fprintf(&sb, "%s\n", title)
-		for _, item := range items {
-			fmt.Fprintf(&sb, "  - %s\n", item)
-		}
-		sb.WriteString("\n")
+	// Render all buckets as flat bullets (Decided → Shipped → Investigated → Risk)
+	allItems := append(append(append(b.decided, b.shipped...), b.investigated...), b.risk...)
+	for _, item := range allItems {
+		fmt.Fprintf(&sb, "%s%s\n", bulletPrefix, item)
 	}
 
-	renderSection("Decided", b.decided)
-	renderSection("Shipped", b.shipped)
-	renderSection("Investigated", b.investigated)
-	renderSection("Risk", b.risk)
-
-	// Summary line — multi-day only
-	if isMultiDay {
-		td := totalDays
-		if td <= 0 {
-			td = len(days)
-		}
-		projectSet := make(map[string]bool)
-		var totalCommits int
-		activeDays := 0
-		for _, day := range days {
-			if len(day.ByProject) > 0 {
-				activeDays++
-				for k, p := range day.ByProject {
-					projectSet[k] = true
-					totalCommits += p.CommitCount
-				}
-			}
-		}
-		fmt.Fprintf(&sb, "%d projects \u00b7 %d commits \u00b7 active %d of %d days\n",
-			len(projectSet), totalCommits, activeDays, td)
-	}
 
 	return strings.TrimRight(sb.String(), "\n") + "\n"
 }
@@ -466,6 +443,28 @@ func commitBucket(msg string) string {
 	default:
 		return "shipped"
 	}
+}
+
+// noteQualityLight is a minimal junk filter for the heuristic path (Synthesize/SynthesizeSlack).
+// It removes bare-hash notes, meta prefixes, and known noise strings without imposing
+// a length minimum so legitimate short notes ("Built the login page") still pass.
+func noteQualityLight(note string) bool {
+	if len(note) < 10 {
+		return false
+	}
+	if bareHashRe.MatchString(note) {
+		return false
+	}
+	lower := strings.ToLower(note)
+	for _, prefix := range []string{"pushed", "committed", "fixed."} {
+		if strings.HasPrefix(lower, prefix) {
+			return false
+		}
+	}
+	if note == "All the content." {
+		return false
+	}
+	return true
 }
 
 // noteQuality returns true if the note is worth including in the standup.

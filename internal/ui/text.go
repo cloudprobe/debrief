@@ -38,7 +38,7 @@ func RenderCostTable(days []model.DaySummary) string {
 			continue
 		}
 
-		// Collect and sort model keys alphabetically.
+		// Collect and sort model keys alphabetically; skip zero-cost models (local/synthetic).
 		keys := make([]string, 0, len(day.ByModel))
 		for k := range day.ByModel {
 			keys = append(keys, k)
@@ -49,11 +49,18 @@ func RenderCostTable(days []model.DaySummary) string {
 		var subtotal float64
 		for _, k := range keys {
 			ms := day.ByModel[k]
+			if ms.TotalCost == 0 {
+				continue // skip local models, synthetic sessions, etc.
+			}
 			mrows = append(mrows, modelRow{
 				model: shortModelName(k),
 				cost:  ms.TotalCost,
 			})
 			subtotal += ms.TotalCost
+		}
+
+		if len(mrows) == 0 {
+			continue // day had only zero-cost activity
 		}
 
 		grandTotal += subtotal
@@ -154,11 +161,13 @@ func RenderCostTable(days []model.DaySummary) string {
 				cell(mr.model, modelW),
 				costCell(fmt.Sprintf("$%.2f", mr.cost)))
 		}
-		// Subtotal row.
-		fmt.Fprintf(&b, "\u2502%s\u2502%s\u2502%s\u2502\n",
-			cell("", dateW),
-			cellRune(subtotalLabel, modelW),
-			costCell(fmt.Sprintf("$%.2f", dg.subtotal)))
+		// Subtotal row — only when more than one model.
+		if len(dg.rows) > 1 {
+			fmt.Fprintf(&b, "\u2502%s\u2502%s\u2502%s\u2502\n",
+				cell("", dateW),
+				cellRune(subtotalLabel, modelW),
+				costCell(fmt.Sprintf("$%.2f", dg.subtotal)))
+		}
 	}
 
 	// Grand total row.

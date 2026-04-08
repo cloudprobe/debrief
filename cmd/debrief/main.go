@@ -257,14 +257,9 @@ func runStandup(dr model.DateRange, header string, projectFilter string, byProje
 		totalDays = 1
 	}
 
-	var body string
-	if format == "slack" {
-		body = synthesizer.SynthesizeSlack(days, totalDays)
-	} else {
-		body = synthesizer.SynthesizeSmart(days, totalDays, header)
-		if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
-		}
+	body := synthesizer.SynthesizeSmart(days, totalDays, header, format == "slack")
+	if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
 	}
 
 	fmt.Print(body)
