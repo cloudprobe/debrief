@@ -3,6 +3,7 @@ package synthesis
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/cloudprobe/debrief/internal/journal"
 )
@@ -34,7 +35,12 @@ func renderExtras(journalEntries []journal.Entry, previousStandup, previousDate 
 		}
 		combined := strings.Join(sanitized, "\n")
 		if len(combined) > maxPreviousStandupChars {
-			combined = combined[:maxPreviousStandupChars] + "...[truncated]"
+			// Find the last valid UTF-8 boundary at or before the limit.
+			end := maxPreviousStandupChars
+			for end > 0 && !utf8.ValidString(combined[:end]) {
+				end--
+			}
+			combined = combined[:end] + "...[truncated]"
 		}
 		fmt.Fprintln(&sb, combined)
 		fmt.Fprintln(&sb)

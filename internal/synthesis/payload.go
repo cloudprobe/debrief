@@ -23,6 +23,9 @@ func BuildPayload(days []model.DaySummary, totalDays int, dateLabel string, maxB
 		payload = renderPayload(days, totalDays, dateLabel, lvl)
 	}
 	if len(payload) > maxBytes {
+		if maxBytes <= 12 {
+			return "[truncated]"
+		}
 		payload = payload[:maxBytes-12] + "\n[truncated]"
 	}
 	return payload
@@ -96,7 +99,7 @@ func renderPayload(days []model.DaySummary, totalDays int, dateLabel string, lvl
 		}
 		sort.Slice(projects, func(i, j int) bool { return projects[i].score > projects[j].score })
 
-		// Level 5: cap projects to top 3 by score (drop low-activity ones).
+		// Level 4+: cap projects (4 → top 3, 5 → top 1).
 		maxProjects := len(projects)
 		if lvl >= 4 && maxProjects > 3 {
 			maxProjects = 3

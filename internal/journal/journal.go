@@ -25,7 +25,7 @@ func Path(cfgDir string, date time.Time) string {
 
 // Append adds a timestamped entry to today's journal file.
 // Creates the file with header if it doesn't exist.
-func Append(cfgDir string, t time.Time, msg string) error {
+func Append(cfgDir string, t time.Time, msg string) (err error) {
 	dir := filepath.Join(cfgDir, "journal")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating journal directory: %w", err)

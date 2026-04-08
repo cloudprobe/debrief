@@ -97,9 +97,9 @@ func TestBuildPayload_NeverExceedsMax(t *testing.T) {
 		days     []model.DaySummary
 		maxBytes int
 	}{
-		{"single day", []model.DaySummary{dayFixture()}, 100},
-		{"single day", []model.DaySummary{dayFixture()}, 1000},
-		{"single day", []model.DaySummary{dayFixture()}, 50_000},
+		{"single day 100b", []model.DaySummary{dayFixture()}, 100},
+		{"single day 1kb", []model.DaySummary{dayFixture()}, 1000},
+		{"single day 50kb", []model.DaySummary{dayFixture()}, 50_000},
 		{"empty", []model.DaySummary{}, 50_000},
 		{"tiny max", []model.DaySummary{dayFixture()}, 50},
 	}
