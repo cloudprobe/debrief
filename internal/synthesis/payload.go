@@ -50,7 +50,7 @@ func sanitizeForPrompt(s string) string {
 //	Level 2: cap commit_messages at 5 per project
 //	Level 3: cap session_notes at 3 per project
 //	Level 4: drop files_created/files_modified
-//	Level 5: cap projects to top 3 by score
+//	Level 5: cap projects to top 1 by score
 func renderPayload(days []model.DaySummary, totalDays int, dateLabel string, lvl truncLevel) string {
 	var b strings.Builder
 
