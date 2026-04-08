@@ -429,6 +429,123 @@ func TestStripPrefix(t *testing.T) {
 	}
 }
 
+func TestSynthesizeSlack_SingleDay(t *testing.T) {
+	days := []model.DaySummary{
+		{
+			Date:       time.Date(2026, 4, 7, 0, 0, 0, 0, time.UTC),
+			Activities: []model.Activity{{Project: "myproject", Source: "claude-code"}},
+			ByProject: map[string]model.ProjectSummary{
+				"myproject": {
+					Name:         "myproject",
+					SessionNotes: []string{"Built the login page", "Added password validation"},
+				},
+			},
+		},
+	}
+	got := SynthesizeSlack(days, 1)
+	if !strings.Contains(got, "*2026-04-07*") {
+		t.Errorf("expected date header *2026-04-07*, got:\n%s", got)
+	}
+	if !strings.Contains(got, "*myproject*") {
+		t.Errorf("expected project header *myproject*, got:\n%s", got)
+	}
+	if !strings.Contains(got, "- Built the login page") {
+		t.Errorf("expected bullet 'Built the login page', got:\n%s", got)
+	}
+	if !strings.Contains(got, "- Added password validation") {
+		t.Errorf("expected bullet 'Added password validation', got:\n%s", got)
+	}
+}
+
+func TestSynthesizeSlack_MultiDay(t *testing.T) {
+	days := []model.DaySummary{
+		{
+			Date:       time.Date(2026, 4, 7, 0, 0, 0, 0, time.UTC),
+			Activities: []model.Activity{{Project: "proj-a", Source: "claude-code"}},
+			ByProject: map[string]model.ProjectSummary{
+				"proj-a": {Name: "proj-a", SessionNotes: []string{"Did thing A"}},
+			},
+		},
+		{
+			Date:       time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC),
+			Activities: []model.Activity{{Project: "proj-b", Source: "claude-code"}},
+			ByProject: map[string]model.ProjectSummary{
+				"proj-b": {Name: "proj-b", SessionNotes: []string{"Did thing B"}},
+			},
+		},
+	}
+	got := SynthesizeSlack(days, 2)
+	if !strings.Contains(got, "*2026-04-07*") {
+		t.Errorf("expected *2026-04-07* header, got:\n%s", got)
+	}
+	if !strings.Contains(got, "*2026-04-08*") {
+		t.Errorf("expected *2026-04-08* header, got:\n%s", got)
+	}
+	// Bullets appear under each day's project.
+	if !strings.Contains(got, "- Did thing A") {
+		t.Errorf("expected bullet 'Did thing A' under proj-a, got:\n%s", got)
+	}
+	if !strings.Contains(got, "- Did thing B") {
+		t.Errorf("expected bullet 'Did thing B' under proj-b, got:\n%s", got)
+	}
+	// Summary line appears for multi-day output.
+	if !strings.Contains(got, "projects") {
+		t.Errorf("expected 'projects' in summary line, got:\n%s", got)
+	}
+	if !strings.Contains(got, "active") {
+		t.Errorf("expected 'active' in summary line, got:\n%s", got)
+	}
+}
+
+func TestSynthesizeSlack_PRLinks(t *testing.T) {
+	days := []model.DaySummary{
+		{
+			Date:       time.Date(2026, 4, 7, 0, 0, 0, 0, time.UTC),
+			Activities: []model.Activity{{Project: "debrief", Source: "claude-code"}},
+			ByProject: map[string]model.ProjectSummary{
+				"debrief": {
+					Name:           "debrief",
+					SessionNotes:   []string{"Added slack output"},
+					CommitMessages: []string{"closes https://github.com/cloudprobe/debrief/pull/42"},
+					CommitCount:    1,
+				},
+			},
+		},
+	}
+	got := SynthesizeSlack(days, 1)
+	if !strings.Contains(got, "PRs: https://github.com/cloudprobe/debrief/pull/42") {
+		t.Errorf("expected PRs line, got:\n%s", got)
+	}
+}
+
+func TestSynthesizeSlack_Empty(t *testing.T) {
+	got := SynthesizeSlack([]model.DaySummary{}, 0)
+	if got != noActivity {
+		t.Errorf("expected 'No activity to report.\\n', got: %q", got)
+	}
+}
+
+func TestSynthesizeFlatPRLinks(t *testing.T) {
+	days := []model.DaySummary{
+		{
+			Date:       time.Date(2026, 4, 7, 0, 0, 0, 0, time.UTC),
+			Activities: []model.Activity{{Project: "debrief", Source: "claude-code"}},
+			ByProject: map[string]model.ProjectSummary{
+				"debrief": {
+					Name:           "debrief",
+					SessionNotes:   []string{"Added slack output"},
+					CommitMessages: []string{"closes https://github.com/cloudprobe/debrief/pull/42"},
+					CommitCount:    1,
+				},
+			},
+		},
+	}
+	got := Synthesize(days, 1, false)
+	if !strings.Contains(got, "PRs: https://github.com/cloudprobe/debrief/pull/42") {
+		t.Errorf("flat mode regression: expected PRs line, got:\n%s", got)
+	}
+}
+
 func TestSortedProjects(t *testing.T) {
 	byProject := map[string]model.ProjectSummary{
 		"low":    {Name: "low", CommitCount: 1, Interactions: 0},

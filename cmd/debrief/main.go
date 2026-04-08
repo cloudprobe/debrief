@@ -2,12 +2,17 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"github.com/cloudprobe/debrief/internal/aggregator"
+	"github.com/cloudprobe/debrief/internal/clipboard"
 	"github.com/cloudprobe/debrief/internal/collector"
 	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/daterange"
+	"github.com/cloudprobe/debrief/internal/journal"
 	"github.com/cloudprobe/debrief/internal/model"
+	"github.com/cloudprobe/debrief/internal/synthesis"
 	"github.com/cloudprobe/debrief/internal/synthesizer"
 	"github.com/cloudprobe/debrief/internal/ui"
 	versioncheck "github.com/cloudprobe/debrief/internal/version"
@@ -16,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const argWeek = "week"
@@ -67,6 +73,7 @@ Run "debrief <command> -help" for information on a specific command.`,
 	root.AddCommand(standupCmd())
 	root.AddCommand(costCmd())
 	root.AddCommand(versionCmd())
+	root.AddCommand(logCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -88,6 +95,9 @@ func initCmd() *cobra.Command {
 func standupCmd() *cobra.Command {
 	var projectFilter string
 	var byProject bool
+	var format string
+	var copyOut bool
+	var noAI bool
 	cmd := &cobra.Command{
 		Use:       "standup [today|yesterday|week|month]",
 		Short:     "Generate a copy-paste standup summary",
@@ -95,30 +105,36 @@ func standupCmd() *cobra.Command {
 		ValidArgs: []string{"today", "yesterday", argWeek, "month"},
 		Args:      cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if format != "text" && format != "slack" {
+				return fmt.Errorf("invalid --format %q (allowed: text, slack)", format)
+			}
 			if len(args) > 0 {
 				switch args[0] {
 				case "today":
-					return runStandup(daterange.TodayRange(), "", projectFilter, byProject)
+					return runStandup(daterange.TodayRange(), "", projectFilter, byProject, format, copyOut, noAI)
 				case "yesterday":
-					return runStandup(daterange.YesterdayRange(), "", projectFilter, byProject)
+					return runStandup(daterange.YesterdayRange(), "", projectFilter, byProject, format, copyOut, noAI)
 				case argWeek:
 					dr := daterange.WeekRange()
 					sun := dr.Start.AddDate(0, 0, 6)
-					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, byProject)
+					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, byProject, format, copyOut, noAI)
 				case "month":
 					dr := daterange.MonthRange()
-					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, byProject)
+					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, byProject, format, copyOut, noAI)
 				}
 			}
 			dr, err := daterange.Resolve(date)
 			if err != nil {
 				return err
 			}
-			return runStandup(dr, "", projectFilter, byProject)
+			return runStandup(dr, "", projectFilter, byProject, format, copyOut, noAI)
 		},
 	}
 	cmd.Flags().StringVarP(&projectFilter, "project", "p", "", "filter to projects matching name")
-	cmd.Flags().BoolVar(&byProject, "by-project", false, "group bullets under project headers")
+	cmd.Flags().BoolVar(&byProject, "by-project", false, "group output by project (default when --format slack)")
+	cmd.Flags().StringVarP(&format, "format", "f", "text", "output format: text or slack")
+	cmd.Flags().BoolVar(&copyOut, "copy", false, "copy output to clipboard")
+	cmd.Flags().BoolVar(&noAI, "no-ai", false, "skip Claude synthesis, use heuristic output (for offline/CI use)")
 	return cmd
 }
 
@@ -227,7 +243,7 @@ func runInit() error {
 	return nil
 }
 
-func runStandup(dr model.DateRange, header string, projectFilter string, byProject bool) error {
+func runStandup(dr model.DateRange, header string, projectFilter string, byProject bool, format string, copyOut bool, noAI bool) error {
 	cfg := config.Load()
 	allActivities := collectActivities(cfg, dr, false)
 	days := daterange.SplitByDay(allActivities, dr, aggregator.Aggregate)
@@ -239,15 +255,67 @@ func runStandup(dr model.DateRange, header string, projectFilter string, byProje
 		}
 		fmt.Printf("Showing: projects matching %q\n\n", projectFilter)
 	}
-	if header != "" {
-		fmt.Printf("%s\n%s\n\n", header, strings.Repeat("\u2500", len(header)))
-	}
 	// Compute total calendar days in the period for period summary.
 	totalDays := int(dr.End.Sub(dr.Start).Hours()/24) + 1
 	if totalDays < 1 {
 		totalDays = 1
 	}
-	fmt.Print(synthesizer.Synthesize(days, totalDays, byProject))
+
+	var body string
+	if format == "slack" {
+		body = synthesizer.SynthesizeSlack(days, totalDays)
+	} else {
+		// Read journal entries for today
+		journalEntries, _ := journal.ReadEntries(config.ConfigDir(), time.Now())
+
+		// Read yesterday's standup
+		prevText, prevDate, _ := journal.ReadLastStandup(config.ConfigDir())
+		prevDateStr := ""
+		if !prevDate.IsZero() {
+			prevDateStr = prevDate.Format("2006-01-02")
+		}
+
+		if !noAI {
+			out, err := synthesis.Synthesize(context.Background(), days, totalDays, header, synthesis.Options{
+				JournalEntries:  journalEntries,
+				PreviousStandup: prevText,
+				PreviousDate:    prevDateStr,
+			})
+			switch {
+			case err == nil:
+				body = out
+				// Save successful standup
+				if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
+				}
+			case errors.Is(err, synthesis.ErrNoClaude):
+				fmt.Fprintln(os.Stderr, "note: claude not found in PATH — using heuristic output")
+			case errors.Is(err, synthesis.ErrEmptyOutput):
+				fmt.Fprintln(os.Stderr, "note: claude returned empty output — using heuristic output")
+			case errors.Is(err, context.DeadlineExceeded):
+				fmt.Fprintln(os.Stderr, "note: claude synthesis timed out — using heuristic output")
+			default:
+				fmt.Fprintf(os.Stderr, "note: claude synthesis failed (%v) — using heuristic output\n", err)
+			}
+		}
+		if body == "" {
+			var sb strings.Builder
+			if header != "" {
+				fmt.Fprintf(&sb, "%s\n%s\n\n", header, strings.Repeat("\u2500", len(header)))
+			}
+			sb.WriteString(synthesizer.Synthesize(days, totalDays, byProject))
+			body = sb.String()
+		}
+	}
+
+	fmt.Print(body)
+	if copyOut {
+		if tool, ok, err := clipboard.Copy(body); ok {
+			fmt.Fprintln(os.Stderr, "[copied to clipboard]")
+		} else if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: clipboard copy failed (%s): %v\n", tool, err)
+		}
+	}
 	return nil
 }
 
@@ -300,6 +368,52 @@ func filterDays(days []model.DaySummary, filter string) []model.DaySummary {
 		}
 	}
 	return result
+}
+
+func logCmd() *cobra.Command {
+	var list bool
+	cmd := &cobra.Command{
+		Use:     `log "message"`,
+		Short:   "Record a journal entry for today (decisions, blockers, notes)",
+		GroupID: "main",
+		Args:    cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg := config.Load()
+			if list {
+				return runLogList(cfg)
+			}
+			if len(args) == 0 {
+				return errors.New(`usage: debrief log "your message"  (or: debrief log --list)`)
+			}
+			return runLogAppend(cfg, strings.Join(args, " "))
+		},
+	}
+	cmd.Flags().BoolVar(&list, "list", false, "show today's journal entries")
+	return cmd
+}
+
+func runLogAppend(_ config.Config, msg string) error {
+	now := time.Now()
+	if err := journal.Append(config.ConfigDir(), now, msg); err != nil {
+		return fmt.Errorf("journal write failed: %w", err)
+	}
+	fmt.Printf("logged: [%s] %s\n", now.Format("15:04"), msg)
+	return nil
+}
+
+func runLogList(_ config.Config) error {
+	entries, err := journal.ReadEntries(config.ConfigDir(), time.Now())
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		fmt.Println("No journal entries for today.")
+		return nil
+	}
+	for _, e := range entries {
+		fmt.Printf("[%s] %s\n", e.Time, e.Message)
+	}
+	return nil
 }
 
 func collectActivities(cfg config.Config, dr model.DateRange, costMode bool) []model.Activity {
