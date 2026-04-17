@@ -2,9 +2,11 @@ package humanizer_test
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudprobe/debrief/internal/humanizer"
 )
@@ -25,6 +27,36 @@ func TestClaudeCLIMissingBinary(t *testing.T) {
 	_, err := h.Rewrite(context.Background(), "some prompt")
 	if err == nil {
 		t.Fatal("expected error for missing binary, got nil")
+	}
+}
+
+func TestClaudeCLIContextCancel(t *testing.T) {
+	sleepPath, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skip("sleep not found on PATH")
+	}
+
+	h := humanizer.ClaudeCLI{Binary: sleepPath, Timeout: 30 * time.Second}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	_, rerr := h.Rewrite(ctx, "5")
+	elapsed := time.Since(start)
+
+	if rerr == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if !errors.Is(rerr, context.Canceled) && !errors.Is(rerr, context.DeadlineExceeded) {
+		// The error may be wrapped inside an exec exit error; check the string too.
+		t.Logf("error: %v", rerr)
+	}
+	if elapsed >= 5*time.Second {
+		t.Errorf("call took %v, expected well under 5s after ctx cancel", elapsed)
 	}
 }
 

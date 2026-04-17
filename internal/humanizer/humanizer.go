@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"time"
 )
@@ -22,6 +23,10 @@ type NoOp struct{}
 func (NoOp) Rewrite(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
+
+// maxStdoutBytes caps the stdout buffer when reading claude output.
+// A response exceeding this limit triggers an error and the caller falls back.
+const maxStdoutBytes = 1024 * 1024 // 1 MB
 
 // ClaudeCLI calls the Claude CLI binary with -p <prompt> and returns stdout.
 // Binary defaults to "claude" resolved via PATH. Timeout defaults to 20s.
@@ -54,10 +59,14 @@ func (c ClaudeCLI) Rewrite(ctx context.Context, prompt string) (string, error) {
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	// Discard stderr to avoid polluting the user's terminal.
-	cmd.Stderr = nil
+	cmd.Stderr = io.Discard
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("humanizer: claude exited with error: %w", err)
+	}
+
+	if stdout.Len() > maxStdoutBytes {
+		return "", fmt.Errorf("humanizer: response too large (%d bytes, limit %d)", stdout.Len(), maxStdoutBytes)
 	}
 
 	out := stdout.String()

@@ -301,7 +301,7 @@ func runStandup(dr model.DateRange, header string, projectFilter string, format 
 	// Wrap h so that any error during humanization triggers the one-time stderr hint
 	// and falls back transparently. The synthesizer already handles ("",nil) as NoOp.
 	hw := &humanizeFallbackWrapper{inner: h}
-	body := synthesizer.SynthesizeSmartWith(days, header, format == "slack", hw)
+	body := synthesizer.SynthesizeSmartWith(context.Background(), days, header, format == "slack", hw)
 	if body != synthesizer.NoActivity {
 		if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)

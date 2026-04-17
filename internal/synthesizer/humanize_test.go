@@ -2,6 +2,7 @@ package synthesizer
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -27,7 +28,7 @@ func TestHumanizeBulletsHappyPath(t *testing.T) {
 		"feat: add login page",
 		"Decided to utilize gRPC instead of REST",
 	}
-	got := humanizeBullets(items, f)
+	got := humanizeBullets(context.Background(), items, f)
 	if len(got) != 3 {
 		t.Fatalf("expected 3 items, got %d: %v", len(got), got)
 	}
@@ -48,7 +49,7 @@ func TestHumanizeBulletsCountMismatch(t *testing.T) {
 		out: "1. Fixed the auth bug\n2. Shipped the login page",
 	}
 	items := []string{"a longer original item one", "b longer original item two", "c longer original item three"}
-	got := humanizeBullets(items, f)
+	got := humanizeBullets(context.Background(), items, f)
 	if len(got) != 3 {
 		t.Fatalf("expected 3 (originals), got %d", len(got))
 	}
@@ -62,7 +63,7 @@ func TestHumanizeBulletsCountMismatch(t *testing.T) {
 func TestHumanizeBulletsEmptyStdout(t *testing.T) {
 	f := &fakeHumanizer{out: ""}
 	items := []string{"first item to return as original", "second item to return as original"}
-	got := humanizeBullets(items, f)
+	got := humanizeBullets(context.Background(), items, f)
 	if len(got) != 2 {
 		t.Fatalf("expected 2 (originals), got %d", len(got))
 	}
@@ -79,7 +80,7 @@ func TestHumanizeBulletsErrorFromRunner(t *testing.T) {
 		err: context.DeadlineExceeded,
 	}
 	items := []string{"original one here for test", "original two here for test", "original three for test"}
-	got := humanizeBullets(items, f)
+	got := humanizeBullets(context.Background(), items, f)
 	for i, want := range items {
 		if got[i] != want {
 			t.Errorf("[%d] = %q, want original %q", i, got[i], want)
@@ -93,7 +94,7 @@ func TestHumanizeBulletsScrambledNumbering(t *testing.T) {
 		out: "2. Something first\n1. Something second\n3. Something third",
 	}
 	items := []string{"original first item here", "original second item here", "original third item here"}
-	got := humanizeBullets(items, f)
+	got := humanizeBullets(context.Background(), items, f)
 	for i, want := range items {
 		if got[i] != want {
 			t.Errorf("[%d] = %q, want original %q", i, got[i], want)
@@ -103,7 +104,7 @@ func TestHumanizeBulletsScrambledNumbering(t *testing.T) {
 
 func TestHumanizeBulletsEmptyInput(t *testing.T) {
 	f := &fakeHumanizer{out: "1. something"}
-	got := humanizeBullets(nil, f)
+	got := humanizeBullets(context.Background(), nil, f)
 	if len(got) != 0 {
 		t.Fatalf("expected empty slice for nil input, got %v", got)
 	}
@@ -112,7 +113,7 @@ func TestHumanizeBulletsEmptyInput(t *testing.T) {
 	}
 
 	f2 := &fakeHumanizer{out: "1. something"}
-	got2 := humanizeBullets([]string{}, f2)
+	got2 := humanizeBullets(context.Background(), []string{}, f2)
 	if len(got2) != 0 {
 		t.Fatalf("expected empty slice for empty input, got %v", got2)
 	}
@@ -126,7 +127,7 @@ func TestHumanizeBulletsMergeCommitPRPreservation(t *testing.T) {
 		out: "1. Merged #42 from foo/bar",
 	}
 	items := []string{"Merge pull request #42 from foo/bar"}
-	got := humanizeBullets(items, f)
+	got := humanizeBullets(context.Background(), items, f)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 item, got %d", len(got))
 	}
@@ -135,21 +136,27 @@ func TestHumanizeBulletsMergeCommitPRPreservation(t *testing.T) {
 	}
 }
 
-// TestHumanizeBulletsNoMarkdownStripping documents that the parser accepts lines
-// containing markdown emphasis — stripping markdown is a prompt-level constraint,
-// not a parser responsibility.
-func TestHumanizeBulletsNoMarkdownStripping(t *testing.T) {
+// TestHumanizeBulletsHappyPathNoMarkdown is a Slack regression guard: the humanizer
+// prompt instructs Claude not to produce markdown emphasis. When the runner returns
+// clean output, no bullet should contain *, _, or backtick emphasis characters.
+func TestHumanizeBulletsHappyPathNoMarkdown(t *testing.T) {
 	f := &fakeHumanizer{
-		out: "1. Fixed *bold* issue in module",
+		out: "1. Fixed the auth bug\n2. Shipped the login page\n3. Went with gRPC over REST",
 	}
-	items := []string{"Fixed the bold issue in the module"}
-	got := humanizeBullets(items, f)
-	if len(got) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(got))
+	items := []string{
+		"Fixed the authentication bug in the module",
+		"feat: add login page",
+		"Decided to utilize gRPC instead of REST",
 	}
-	// Parser must accept and return the line as-is (markdown not stripped by parser).
-	if got[0] != "Fixed *bold* issue in module" {
-		t.Errorf("got %q, want %q", got[0], "Fixed *bold* issue in module")
+	got := humanizeBullets(context.Background(), items, f)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 items, got %d: %v", len(got), got)
+	}
+	markdownEmphasis := regexp.MustCompile(`[*_` + "`" + `]`)
+	for i, bullet := range got {
+		if markdownEmphasis.MatchString(bullet) {
+			t.Errorf("bullet[%d] %q contains markdown emphasis character", i, bullet)
+		}
 	}
 }
 
@@ -161,7 +168,7 @@ func TestHumanizeBulletsPromptTooLarge(t *testing.T) {
 	for i := range items {
 		items[i] = item
 	}
-	got := humanizeBullets(items, f)
+	got := humanizeBullets(context.Background(), items, f)
 	if f.calls != 0 {
 		t.Fatalf("runner must not be called when prompt > 100KB, got %d calls", f.calls)
 	}

@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/cloudprobe/debrief/internal/humanizer"
 )
@@ -43,7 +42,9 @@ var numberedLineRe = regexp.MustCompile(`^\s*(\d+)[.)]\s+(.*)$`)
 // humanizeBullets rewrites items via h in a single call and returns a slice of
 // the same length. On any failure (empty input, prompt too large, runner error,
 // parse mismatch, scrambled numbering) it returns the original items unchanged.
-func humanizeBullets(items []string, h humanizer.Humanizer) []string {
+// The caller-supplied ctx is forwarded directly to h.Rewrite; timeout management
+// is the responsibility of h (e.g. ClaudeCLI applies its own per-call timeout).
+func humanizeBullets(ctx context.Context, items []string, h humanizer.Humanizer) []string {
 	if len(items) == 0 {
 		return items
 	}
@@ -58,9 +59,6 @@ func humanizeBullets(items []string, h humanizer.Humanizer) []string {
 	if len(prompt) > maxPromptBytes {
 		return items
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
 
 	raw, err := h.Rewrite(ctx, prompt)
 	if err != nil || raw == "" {

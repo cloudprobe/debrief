@@ -4,6 +4,7 @@
 package synthesizer
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
@@ -110,13 +111,14 @@ func dedup(notes []string) []string {
 // it produces a flat rollup across all days.
 // If slack is true, the header is bold (*date*) and bullets use Slack's "- " prefix.
 func SynthesizeSmart(days []model.DaySummary, dateLabel string, slack bool) string {
-	return SynthesizeSmartWith(days, dateLabel, slack, humanizer.NoOp{})
+	return SynthesizeSmartWith(context.Background(), days, dateLabel, slack, humanizer.NoOp{})
 }
 
-// SynthesizeSmartWith is SynthesizeSmart with an injectable humanizer.
+// SynthesizeSmartWith is SynthesizeSmart with an injectable humanizer and caller context.
+// ctx is forwarded to h.Rewrite for cancellation and deadline propagation.
 // h rewrites the final bullet list before rendering; pass humanizer.NoOp{} for
 // deterministic output (identical to SynthesizeSmart).
-func SynthesizeSmartWith(days []model.DaySummary, dateLabel string, slack bool, h humanizer.Humanizer) string {
+func SynthesizeSmartWith(ctx context.Context, days []model.DaySummary, dateLabel string, slack bool, h humanizer.Humanizer) string {
 	type bucket struct{ decided, shipped, investigated, risk []string }
 	var b bucket
 
@@ -192,9 +194,13 @@ func SynthesizeSmartWith(days []model.DaySummary, dateLabel string, slack bool, 
 		}
 	}
 
-	// Render all buckets as flat bullets (Decided → Shipped → Investigated → Risk)
-	allItems := append(append(append(b.decided, b.shipped...), b.investigated...), b.risk...)
-	allItems = humanizeBullets(allItems, h)
+	// Render all buckets as flat bullets (Decided → Shipped → Investigated → Risk).
+	// Use a fresh slice to avoid mutating b.decided's backing array.
+	allItems := append([]string(nil), b.decided...)
+	allItems = append(allItems, b.shipped...)
+	allItems = append(allItems, b.investigated...)
+	allItems = append(allItems, b.risk...)
+	allItems = humanizeBullets(ctx, allItems, h)
 	for _, item := range allItems {
 		fmt.Fprintf(&sb, "%s%s\n", bulletPrefix, item)
 	}
