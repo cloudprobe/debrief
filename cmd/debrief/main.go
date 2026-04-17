@@ -102,6 +102,7 @@ func standupCmd() *cobra.Command {
 	var format string
 	var copyOut bool
 	var noHumanize bool
+	var prose bool
 	cmd := &cobra.Command{
 		Use:       "standup [today|yesterday|week|month]",
 		Short:     "Generate a copy-paste standup summary",
@@ -112,20 +113,25 @@ func standupCmd() *cobra.Command {
 			if format != "text" && format != "slack" {
 				return fmt.Errorf("invalid --format %q (allowed: text, slack)", format)
 			}
+			// --prose requires humanize; override --no-humanize if both are set.
+			if prose && noHumanize {
+				fmt.Fprintln(os.Stderr, "prose mode requires humanize; ignoring --no-humanize")
+				noHumanize = false
+			}
 			h := buildHumanizer(noHumanize)
 			if len(args) > 0 {
 				switch args[0] {
 				case "today":
-					return runStandup(daterange.TodayRange(), "", projectFilter, format, copyOut, h)
+					return runStandup(daterange.TodayRange(), "", projectFilter, format, copyOut, prose, h)
 				case "yesterday":
-					return runStandup(daterange.YesterdayRange(), "", projectFilter, format, copyOut, h)
+					return runStandup(daterange.YesterdayRange(), "", projectFilter, format, copyOut, prose, h)
 				case argWeek:
 					dr := daterange.WeekRange()
 					sun := dr.Start.AddDate(0, 0, 6)
-					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, format, copyOut, h)
+					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, format, copyOut, prose, h)
 				case "month":
 					dr := daterange.MonthRange()
-					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, format, copyOut, h)
+					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, format, copyOut, prose, h)
 				default:
 					return fmt.Errorf("unknown argument %q (allowed: today, yesterday, week, month)", args[0])
 				}
@@ -134,13 +140,14 @@ func standupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runStandup(dr, "", projectFilter, format, copyOut, h)
+			return runStandup(dr, "", projectFilter, format, copyOut, prose, h)
 		},
 	}
 	cmd.Flags().StringVarP(&projectFilter, "project", "p", "", "filter to projects matching name")
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "output format: text or slack")
 	cmd.Flags().BoolVar(&copyOut, "copy", false, "copy output to clipboard")
 	cmd.Flags().BoolVar(&noHumanize, "no-humanize", false, "skip Claude CLI rewrite, use raw bullets")
+	cmd.Flags().BoolVar(&prose, "prose", false, "emit 2-3 paragraphs of natural prose instead of bullets (requires humanize)")
 	return cmd
 }
 
@@ -285,7 +292,7 @@ func runInit() error {
 	return nil
 }
 
-func runStandup(dr model.DateRange, header string, projectFilter string, format string, copyOut bool, h humanizer.Humanizer) error {
+func runStandup(dr model.DateRange, header string, projectFilter string, format string, copyOut bool, prose bool, h humanizer.Humanizer) error {
 	cfg := config.Load()
 	allActivities := collectActivities(cfg, dr, false)
 	days := daterange.SplitByDay(allActivities, dr, aggregator.Aggregate)
@@ -301,7 +308,7 @@ func runStandup(dr model.DateRange, header string, projectFilter string, format 
 	// Wrap h so that any error during humanization triggers the one-time stderr hint
 	// and falls back transparently. The synthesizer already handles ("",nil) as NoOp.
 	hw := &humanizeFallbackWrapper{inner: h}
-	body := synthesizer.SynthesizeSmartWith(context.Background(), days, header, format == "slack", hw)
+	body := synthesizer.SynthesizeSmartWith(context.Background(), days, header, format == "slack", prose, hw)
 	if body != synthesizer.NoActivity {
 		if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
