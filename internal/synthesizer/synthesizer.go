@@ -4,11 +4,13 @@
 package synthesizer
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/cloudprobe/debrief/internal/humanizer"
 	"github.com/cloudprobe/debrief/internal/model"
 )
 
@@ -109,6 +111,16 @@ func dedup(notes []string) []string {
 // it produces a flat rollup across all days.
 // If slack is true, the header is bold (*date*) and bullets use Slack's "- " prefix.
 func SynthesizeSmart(days []model.DaySummary, dateLabel string, slack bool) string {
+	return SynthesizeSmartWith(context.Background(), days, dateLabel, slack, false, humanizer.NoOp{})
+}
+
+// SynthesizeSmartWith is SynthesizeSmart with an injectable humanizer, caller context,
+// and prose mode. ctx is forwarded to h.Rewrite for cancellation and deadline propagation.
+// When prose is true and the prose humanizer succeeds, emits header + blank line + prose
+// paragraphs instead of bullets. On prose failure falls back to bullet mode (with bolder
+// humanizer). When prose is false, h rewrites the final bullet list before rendering;
+// pass humanizer.NoOp{} for deterministic output (identical to SynthesizeSmart).
+func SynthesizeSmartWith(ctx context.Context, days []model.DaySummary, dateLabel string, slack, prose bool, h humanizer.Humanizer) string {
 	type bucket struct{ decided, shipped, investigated, risk []string }
 	var b bucket
 
@@ -184,8 +196,26 @@ func SynthesizeSmart(days []model.DaySummary, dateLabel string, slack bool) stri
 		}
 	}
 
-	// Render all buckets as flat bullets (Decided → Shipped → Investigated → Risk)
-	allItems := append(append(append(b.decided, b.shipped...), b.investigated...), b.risk...)
+	// Collect all items (Decided → Shipped → Investigated → Risk).
+	// Use a fresh slice to avoid mutating b.decided's backing array.
+	allItems := append([]string(nil), b.decided...)
+	allItems = append(allItems, b.shipped...)
+	allItems = append(allItems, b.investigated...)
+	allItems = append(allItems, b.risk...)
+
+	// Prose mode: attempt to produce 2–3 paragraphs; fall back to bullets on failure.
+	if prose {
+		if proseText, ok := humanizeAsProse(ctx, allItems, h); ok {
+			header := strings.TrimRight(sb.String(), "\n")
+			if header == "" {
+				return proseText + "\n"
+			}
+			return header + "\n\n" + proseText + "\n"
+		}
+		// Fall through to bullet rendering (bolder humanizer still applies).
+	}
+
+	allItems = humanizeBullets(ctx, allItems, h)
 	for _, item := range allItems {
 		fmt.Fprintf(&sb, "%s%s\n", bulletPrefix, item)
 	}

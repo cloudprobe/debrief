@@ -2,13 +2,21 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/cloudprobe/debrief/internal/aggregator"
 	"github.com/cloudprobe/debrief/internal/clipboard"
 	"github.com/cloudprobe/debrief/internal/collector"
 	"github.com/cloudprobe/debrief/internal/config"
 	"github.com/cloudprobe/debrief/internal/daterange"
+	"github.com/cloudprobe/debrief/internal/humanizer"
 	"github.com/cloudprobe/debrief/internal/journal"
 	"github.com/cloudprobe/debrief/internal/model"
 	"github.com/cloudprobe/debrief/internal/synthesizer"
@@ -16,10 +24,6 @@ import (
 	versioncheck "github.com/cloudprobe/debrief/internal/version"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 )
 
 const argWeek = "week"
@@ -27,6 +31,9 @@ const argWeek = "week"
 var (
 	version = "dev"
 	date    string
+
+	// humanizeFallbackOnce prints the unavailability hint at most once per process.
+	humanizeFallbackOnce sync.Once
 )
 
 func main() {
@@ -94,6 +101,8 @@ func standupCmd() *cobra.Command {
 	var projectFilter string
 	var format string
 	var copyOut bool
+	var noHumanize bool
+	var prose bool
 	cmd := &cobra.Command{
 		Use:       "standup [today|yesterday|week|month]",
 		Short:     "Generate a copy-paste standup summary",
@@ -104,19 +113,25 @@ func standupCmd() *cobra.Command {
 			if format != "text" && format != "slack" {
 				return fmt.Errorf("invalid --format %q (allowed: text, slack)", format)
 			}
+			// --prose requires humanize; override --no-humanize if both are set.
+			if prose && noHumanize {
+				fmt.Fprintln(os.Stderr, "prose mode requires humanize; ignoring --no-humanize")
+				noHumanize = false
+			}
+			h := buildHumanizer(noHumanize)
 			if len(args) > 0 {
 				switch args[0] {
 				case "today":
-					return runStandup(daterange.TodayRange(), "", projectFilter, format, copyOut)
+					return runStandup(daterange.TodayRange(), "", projectFilter, format, copyOut, prose, h)
 				case "yesterday":
-					return runStandup(daterange.YesterdayRange(), "", projectFilter, format, copyOut)
+					return runStandup(daterange.YesterdayRange(), "", projectFilter, format, copyOut, prose, h)
 				case argWeek:
 					dr := daterange.WeekRange()
 					sun := dr.Start.AddDate(0, 0, 6)
-					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, format, copyOut)
+					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, format, copyOut, prose, h)
 				case "month":
 					dr := daterange.MonthRange()
-					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, format, copyOut)
+					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, format, copyOut, prose, h)
 				default:
 					return fmt.Errorf("unknown argument %q (allowed: today, yesterday, week, month)", args[0])
 				}
@@ -125,13 +140,47 @@ func standupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runStandup(dr, "", projectFilter, format, copyOut)
+			return runStandup(dr, "", projectFilter, format, copyOut, prose, h)
 		},
 	}
 	cmd.Flags().StringVarP(&projectFilter, "project", "p", "", "filter to projects matching name")
 	cmd.Flags().StringVarP(&format, "format", "f", "text", "output format: text or slack")
 	cmd.Flags().BoolVar(&copyOut, "copy", false, "copy output to clipboard")
+	cmd.Flags().BoolVar(&noHumanize, "no-humanize", false, "skip Claude CLI rewrite, use raw bullets")
+	cmd.Flags().BoolVar(&prose, "prose", false, "emit 2-3 paragraphs of natural prose instead of bullets (requires humanize)")
 	return cmd
+}
+
+// humanizeFallbackWrapper wraps a Humanizer and prints a one-time stderr hint
+// when the inner humanizer returns an error, then propagates the error so the
+// synthesizer falls back to raw bullets.
+type humanizeFallbackWrapper struct {
+	inner humanizer.Humanizer
+}
+
+func (w *humanizeFallbackWrapper) Rewrite(ctx context.Context, prompt string) (string, error) {
+	out, err := w.inner.Rewrite(ctx, prompt)
+	if err != nil {
+		humanizeFallbackOnce.Do(func() {
+			fmt.Fprintln(os.Stderr, "humanize unavailable — using raw bullets")
+		})
+	}
+	return out, err
+}
+
+// buildHumanizer returns a NoOp when humanization is disabled via flag or env,
+// otherwise returns a ClaudeCLI with the 20s default timeout. When ClaudeCLI
+// returns an error the synthesizer falls back to raw bullets; the one-time stderr
+// hint is emitted via humanizeFallbackOnce.
+func buildHumanizer(noFlag bool) humanizer.Humanizer {
+	if noFlag {
+		return humanizer.NoOp{}
+	}
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("DEBRIEF_HUMANIZE")))
+	if v == "0" || v == "false" || v == "off" {
+		return humanizer.NoOp{}
+	}
+	return humanizer.ClaudeCLI{Timeout: 20 * time.Second}
 }
 
 func costCmd() *cobra.Command {
@@ -243,7 +292,7 @@ func runInit() error {
 	return nil
 }
 
-func runStandup(dr model.DateRange, header string, projectFilter string, format string, copyOut bool) error {
+func runStandup(dr model.DateRange, header string, projectFilter string, format string, copyOut bool, prose bool, h humanizer.Humanizer) error {
 	cfg := config.Load()
 	allActivities := collectActivities(cfg, dr, false)
 	days := daterange.SplitByDay(allActivities, dr, aggregator.Aggregate)
@@ -255,7 +304,11 @@ func runStandup(dr model.DateRange, header string, projectFilter string, format 
 		}
 		fmt.Printf("Showing: projects matching %q\n\n", projectFilter)
 	}
-	body := synthesizer.SynthesizeSmart(days, header, format == "slack")
+
+	// Wrap h so that any error during humanization triggers the one-time stderr hint
+	// and falls back transparently. The synthesizer already handles ("",nil) as NoOp.
+	hw := &humanizeFallbackWrapper{inner: h}
+	body := synthesizer.SynthesizeSmartWith(context.Background(), days, header, format == "slack", prose, hw)
 	if body != synthesizer.NoActivity {
 		if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
