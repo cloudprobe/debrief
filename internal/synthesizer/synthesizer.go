@@ -216,12 +216,22 @@ func SynthesizeSmartWith(ctx context.Context, days []model.DaySummary, dateLabel
 		}
 	}
 
-	// Collect all items (Decided → Shipped → Investigated → Risk).
-	// Use a fresh slice to avoid mutating b.decided's backing array.
-	allItems := append([]string(nil), b.decided...)
-	allItems = append(allItems, b.shipped...)
-	allItems = append(allItems, b.investigated...)
-	allItems = append(allItems, b.risk...)
+	// Track bucket boundaries so we can re-emit section headers after the
+	// humanizer rewrites the flat list. Order is Decided → Shipped →
+	// Investigated → Watch (the display label for the "risk" bucket).
+	bucketSections := []struct {
+		label string
+		items []string
+	}{
+		{"Decided", b.decided},
+		{"Shipped", b.shipped},
+		{"Investigated", b.investigated},
+		{"Watch", b.risk},
+	}
+	var allItems []string
+	for _, s := range bucketSections {
+		allItems = append(allItems, s.items...)
+	}
 
 	// Prose mode: attempt to produce 2–3 paragraphs; fall back to bullets on failure.
 	if prose {
@@ -235,9 +245,37 @@ func SynthesizeSmartWith(ctx context.Context, days []model.DaySummary, dateLabel
 		// Fall through to bullet rendering (bolder humanizer still applies).
 	}
 
-	allItems = humanizeBullets(ctx, allItems, h)
-	for _, item := range allItems {
-		fmt.Fprintf(&sb, "%s%s\n", bulletPrefix, item)
+	humanized := humanizeBullets(ctx, allItems, h)
+
+	// Slack mode stays flat — section headers would clutter a Slack paste.
+	// We also fall back to flat if the humanizer returned a different-length
+	// slice than we sent in (defensive; bucket boundaries would no longer align).
+	if slack || len(humanized) != len(allItems) {
+		for _, item := range humanized {
+			fmt.Fprintf(&sb, "%s%s\n", bulletPrefix, item)
+		}
+		return strings.TrimRight(sb.String(), "\n") + "\n"
+	}
+
+	// Text mode: emit a plain-text section label above each non-empty bucket
+	// so the 4-bucket classifier is visible in the output. Header style matches
+	// the date header (plain line, no markdown #) for terminal readability.
+	idx := 0
+	firstSection := true
+	for _, s := range bucketSections {
+		n := len(s.items)
+		if n == 0 {
+			continue
+		}
+		if !firstSection {
+			sb.WriteByte('\n')
+		}
+		firstSection = false
+		fmt.Fprintf(&sb, "%s\n", s.label)
+		for j := 0; j < n; j++ {
+			fmt.Fprintf(&sb, "%s%s\n", bulletPrefix, humanized[idx+j])
+		}
+		idx += n
 	}
 
 	return strings.TrimRight(sb.String(), "\n") + "\n"

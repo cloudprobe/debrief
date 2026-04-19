@@ -345,6 +345,94 @@ func TestSynthesizeSmart(t *testing.T) {
 		}
 	})
 
+	t.Run("text mode emits section headers for non-empty buckets", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name: "myproject",
+				SessionNotes: []string{
+					"Decided to drop Slack webhook support — too much scope for v1",
+					"Found that goreleaser skips arm64 Linux by default — had to add explicitly",
+				},
+				CommitMessages: []string{"feat: add login page"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		for _, label := range []string{"Decided", "Shipped", "Investigated"} {
+			if !strings.Contains(got, label+"\n") {
+				t.Errorf("expected %q section header, got:\n%s", label, got)
+			}
+		}
+		// Section order must be Decided → Shipped → Investigated.
+		decidedIdx := strings.Index(got, "Decided\n")
+		shippedIdx := strings.Index(got, "Shipped\n")
+		investigatedIdx := strings.Index(got, "Investigated\n")
+		if decidedIdx >= shippedIdx || shippedIdx >= investigatedIdx {
+			t.Errorf("section order wrong: Decided=%d Shipped=%d Investigated=%d\noutput:\n%s",
+				decidedIdx, shippedIdx, investigatedIdx, got)
+		}
+	})
+
+	t.Run("text mode skips empty-bucket headers", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"feat: add login page"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if strings.Contains(got, "Decided\n") {
+			t.Errorf("empty Decided bucket should not emit header, got:\n%s", got)
+		}
+		if strings.Contains(got, "Investigated\n") {
+			t.Errorf("empty Investigated bucket should not emit header, got:\n%s", got)
+		}
+		if strings.Contains(got, "Watch\n") {
+			t.Errorf("empty Watch bucket should not emit header, got:\n%s", got)
+		}
+		if !strings.Contains(got, "Shipped\n") {
+			t.Errorf("expected Shipped section header, got:\n%s", got)
+		}
+	})
+
+	t.Run("text mode uses Watch label for risk bucket", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name: "myproject",
+				SessionNotes: []string{
+					"Risk: the classifier regex is too aggressive on test: prefixes and drops work",
+				},
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if !strings.Contains(got, "Watch\n") {
+			t.Errorf("expected 'Watch' section header for risk bucket, got:\n%s", got)
+		}
+		if strings.Contains(got, "Risk\n") {
+			t.Errorf("should not emit 'Risk' header (Watch is the display label), got:\n%s", got)
+		}
+	})
+
+	t.Run("slack mode stays flat — no section headers", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name: "myproject",
+				SessionNotes: []string{
+					"Decided to drop Slack webhook support — too much scope for v1",
+				},
+				CommitMessages: []string{"feat: add login page"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", true)
+		for _, label := range []string{"Decided\n", "Shipped\n", "Investigated\n", "Watch\n"} {
+			if strings.Contains(got, label) {
+				t.Errorf("slack mode should not emit section header %q, got:\n%s", label, got)
+			}
+		}
+	})
+
 	t.Run("slack format uses bold header and dash bullets", func(t *testing.T) {
 		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
 			"myproject": {
