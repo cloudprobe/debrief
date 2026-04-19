@@ -4,11 +4,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/cloudprobe/debrief/internal/model"
 )
+
+// sanitizedEnv returns os.Environ() with all GIT_* variables stripped. This
+// isolates subprocess git invocations from leaked ambient state (e.g. when
+// the test runs under a pre-push hook or inside a worktree, GIT_DIR/
+// GIT_WORK_TREE/GIT_INDEX_FILE are inherited and break `git init` in temp dirs).
+func sanitizedEnv() []string {
+	env := os.Environ()
+	out := env[:0]
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
 
 func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -25,7 +42,7 @@ func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(sanitizedEnv(),
 			"GIT_AUTHOR_NAME=Test User",
 			"GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test User",
@@ -153,7 +170,7 @@ func TestGitCollector_MultiDayCommitsSplitByDay(t *testing.T) {
 		}
 	}
 
-	baseEnv := append(os.Environ(),
+	baseEnv := append(sanitizedEnv(),
 		"GIT_AUTHOR_NAME=Test User",
 		"GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=Test User",

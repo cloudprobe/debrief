@@ -83,6 +83,7 @@ func TestClaudeCollector_ParseSampleFile(t *testing.T) {
 			}
 			if found == nil {
 				t.Fatalf("project %s not found in activities", tt.project)
+				return // unreachable; keeps staticcheck SA5011 quiet
 			}
 			if found.Model != tt.model {
 				t.Errorf("model: got %q, want %q", found.Model, tt.model)
