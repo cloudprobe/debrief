@@ -309,7 +309,9 @@ func runStandup(dr model.DateRange, header string, projectFilter string, format 
 	// and falls back transparently. The synthesizer already handles ("",nil) as NoOp.
 	hw := &humanizeFallbackWrapper{inner: h}
 	body := synthesizer.SynthesizeSmartWith(context.Background(), days, header, format == "slack", prose, hw)
-	if body != synthesizer.NoActivity {
+	// Skip saving state for sentinel outputs (NoActivity, QuietDay) — they're
+	// status messages, not real standups.
+	if body != synthesizer.NoActivity && body != synthesizer.QuietDay {
 		if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
 		}

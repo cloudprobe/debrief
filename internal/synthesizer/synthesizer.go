@@ -16,12 +16,24 @@ import (
 
 var bareHashRe = regexp.MustCompile(`\b[0-9a-f]{7,}\b`)
 
-// NoActivity is the sentinel returned when there is nothing to report.
-// Callers can compare against this to avoid overwriting real saved state.
+// prSquashRe matches the trailing "(#NNN)" pattern that GitHub/GitLab append to
+// squash-merged commit messages. Presence indicates the commit went through code
+// review and shipped, regardless of its conventional-commit prefix.
+var prSquashRe = regexp.MustCompile(`\(#\d+\)\s*$`)
+
+// NoActivity is the sentinel returned when there is nothing to report at all —
+// no commits, no session notes. Callers can compare against this to avoid
+// overwriting real saved state.
 const NoActivity = "No activity to report.\n"
+
+// QuietDay is the sentinel returned when commits existed but were all filtered
+// as chore/test/docs noise. Signals "tool worked, day was just quiet" rather
+// than "tool found nothing at all".
+const QuietDay = "Quiet day — just chores and lints. Nothing shipped worth writing up.\n"
 
 const (
 	noActivity     = NoActivity
+	quietDay       = QuietDay
 	bucketShipped  = "shipped"
 	bucketSkip     = "skip"
 	bucketDecided  = "decided"
@@ -124,6 +136,10 @@ func SynthesizeSmartWith(ctx context.Context, days []model.DaySummary, dateLabel
 	type bucket struct{ decided, shipped, investigated, risk []string }
 	var b bucket
 
+	// filteredCommits counts commits we dropped as chore/test/docs noise.
+	// Used to distinguish "nothing happened" from "only noise happened".
+	var filteredCommits int
+
 	for _, day := range days {
 		for _, p := range sortedProjects(day.ByProject) {
 			// Collect surviving notes first
@@ -151,6 +167,7 @@ func SynthesizeSmartWith(ctx context.Context, days []model.DaySummary, dateLabel
 			// Classify commits; skip if covered by a note
 			for _, msg := range p.CommitMessages {
 				if commitBucket(msg) == bucketSkip {
+					filteredCommits++
 					continue
 				}
 				stripped := stripPrefix(msg)
@@ -169,6 +186,9 @@ func SynthesizeSmartWith(ctx context.Context, days []model.DaySummary, dateLabel
 	b.risk = dedup(b.risk)
 
 	if len(b.decided)+len(b.shipped)+len(b.investigated)+len(b.risk) == 0 {
+		if filteredCommits > 0 {
+			return quietDay
+		}
 		return noActivity
 	}
 
@@ -226,8 +246,9 @@ func SynthesizeSmartWith(ctx context.Context, days []model.DaySummary, dateLabel
 // commitBucket classifies a commit message into a routing bucket.
 // Returns bucketShipped to include the commit, bucketSkip to drop it.
 // True merge commits (prefix "Merge pull request" / "Merge branch") are always
-// shipped. Squash commits with trailing "(#N)" still go through the conventional
-// prefix filter so chore/test are correctly skipped.
+// shipped. For chore/test/docs prefixes, a PR-squash suffix "(#N)" combined with
+// a substantive body (>20 chars after prefix strip) is treated as evidence the
+// work was reviewed and shipped, overriding the usual skip.
 func commitBucket(msg string) string {
 	// True merge commits — always include.
 	if strings.HasPrefix(msg, "Merge pull request") || strings.HasPrefix(msg, "Merge branch") {
@@ -245,6 +266,11 @@ func commitBucket(msg string) string {
 		prefix = prefix[:i]
 	}
 
+	// Substantive PR-squashed commits override chore/test/docs skipping.
+	// Rationale: work that went through review and merged is worth surfacing
+	// even if the author tagged it chore or test.
+	prSquashSubstantive := prSquashRe.MatchString(msg) && len(stripPrefix(msg)) > 20
+
 	switch prefix {
 	case "feat", "fix", "perf", "refactor", "build", "ci":
 		return bucketShipped
@@ -254,6 +280,9 @@ func commitBucket(msg string) string {
 		}
 		return bucketSkip
 	case "chore", "test":
+		if prSquashSubstantive {
+			return bucketShipped
+		}
 		return bucketSkip
 	default:
 		return bucketShipped

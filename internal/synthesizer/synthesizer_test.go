@@ -164,6 +164,62 @@ func TestSynthesizeSmart(t *testing.T) {
 		}
 	})
 
+	t.Run("chore PR-squash with substantive body APPEARS (merged via review)", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"chore(lint): migrate from eslint to biome with full config rewrite (#42)"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if !strings.Contains(got, "Migrate from eslint to biome") {
+			t.Errorf("substantive PR-squashed chore should appear, got:\n%s", got)
+		}
+	})
+
+	t.Run("test PR-squash with substantive body APPEARS", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"test: add integration tests for payments flow (#42)"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if !strings.Contains(got, "Add integration tests for payments") {
+			t.Errorf("substantive PR-squashed test commit should appear, got:\n%s", got)
+		}
+	})
+
+	t.Run("short chore PR-squash still filtered (no substantive body)", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"chore: bump deps (#42)"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if strings.Contains(got, "bump deps") || strings.Contains(got, "Bump deps") {
+			t.Errorf("short chore PR-squash should still be filtered, got:\n%s", got)
+		}
+	})
+
+	t.Run("chore without PR suffix still filtered even if body is long", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"chore: clean up unused helper functions across the repo"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if strings.Contains(got, "Clean up unused") || strings.Contains(got, "clean up unused") {
+			t.Errorf("chore without PR suffix should still be filtered, got:\n%s", got)
+		}
+	})
+
 	t.Run("note with decided keyword appears first", func(t *testing.T) {
 		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
 			"myproject": {
@@ -234,6 +290,42 @@ func TestSynthesizeSmart(t *testing.T) {
 		got := SynthesizeSmart([]model.DaySummary{}, "", false)
 		if got != noActivity {
 			t.Errorf("expected noActivity, got: %q", got)
+		}
+	})
+
+	t.Run("only chore/test commits returns QuietDay message, not noActivity", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name: "myproject",
+				CommitMessages: []string{
+					"chore: bump deps",
+					"chore: format code",
+					"test: add missing assertion",
+				},
+				CommitCount: 3,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if got == noActivity {
+			t.Errorf("expected QuietDay message, got noActivity")
+		}
+		if !strings.Contains(got, "Quiet day") {
+			t.Errorf("expected 'Quiet day' in output, got:\n%s", got)
+		}
+	})
+
+	t.Run("only chore commit across multi-day returns QuietDay message", func(t *testing.T) {
+		days := []model.DaySummary{
+			makeDay(time.Date(2026, 4, 6, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+				"proj-a": {Name: "proj-a", CommitMessages: []string{"chore: bump deps"}, CommitCount: 1},
+			}),
+		}
+		got := SynthesizeSmart(days, "Week of Apr 6", false)
+		if got == noActivity {
+			t.Errorf("expected QuietDay message, got noActivity")
+		}
+		if !strings.Contains(got, "Quiet") {
+			t.Errorf("expected quiet-day messaging, got:\n%s", got)
 		}
 	})
 
