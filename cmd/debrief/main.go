@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cloudprobe/debrief/internal/aggregator"
@@ -31,9 +30,6 @@ const argWeek = "week"
 var (
 	version = "dev"
 	date    string
-
-	// humanizeFallbackOnce prints the unavailability hint at most once per process.
-	humanizeFallbackOnce sync.Once
 )
 
 func main() {
@@ -118,20 +114,20 @@ func standupCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr, "prose mode requires humanize; ignoring --no-humanize")
 				noHumanize = false
 			}
-			h := buildHumanizer(noHumanize)
+			h, disabled := buildHumanizer(noHumanize)
 			if len(args) > 0 {
 				switch args[0] {
 				case "today":
-					return runStandup(daterange.TodayRange(), "", projectFilter, format, copyOut, prose, h)
+					return runStandup(daterange.TodayRange(), "", projectFilter, format, copyOut, prose, h, disabled)
 				case "yesterday":
-					return runStandup(daterange.YesterdayRange(), "", projectFilter, format, copyOut, prose, h)
+					return runStandup(daterange.YesterdayRange(), "", projectFilter, format, copyOut, prose, h, disabled)
 				case argWeek:
 					dr := daterange.WeekRange()
 					sun := dr.Start.AddDate(0, 0, 6)
-					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, format, copyOut, prose, h)
+					return runStandup(dr, fmt.Sprintf("Week of %s \u2013 %s", dr.Start.Format("Jan 2"), sun.Format("Jan 2, 2006")), projectFilter, format, copyOut, prose, h, disabled)
 				case "month":
 					dr := daterange.MonthRange()
-					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, format, copyOut, prose, h)
+					return runStandup(dr, dr.Start.Format("January 2006"), projectFilter, format, copyOut, prose, h, disabled)
 				default:
 					return fmt.Errorf("unknown argument %q (allowed: today, yesterday, week, month)", args[0])
 				}
@@ -140,7 +136,7 @@ func standupCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runStandup(dr, "", projectFilter, format, copyOut, prose, h)
+			return runStandup(dr, "", projectFilter, format, copyOut, prose, h, disabled)
 		},
 	}
 	cmd.Flags().StringVarP(&projectFilter, "project", "p", "", "filter to projects matching name")
@@ -151,36 +147,67 @@ func standupCmd() *cobra.Command {
 	return cmd
 }
 
-// humanizeFallbackWrapper wraps a Humanizer and prints a one-time stderr hint
-// when the inner humanizer returns an error, then propagates the error so the
-// synthesizer falls back to raw bullets.
+// humanizeFallbackWrapper wraps a Humanizer and tracks whether any Rewrite
+// call returned a non-empty success or a failure. The outcome drives the
+// post-render banner so users know whether they're looking at humanized
+// bullets, explicitly-disabled raw output, or raw output caused by a missing
+// `claude` binary.
 type humanizeFallbackWrapper struct {
-	inner humanizer.Humanizer
+	inner     humanizer.Humanizer
+	disabled  bool // true when humanize was explicitly turned off (flag/env)
+	attempted bool // at least one Rewrite call was made
+	succeeded bool // at least one Rewrite returned non-empty without error
+	failed    bool // at least one Rewrite returned an error
 }
 
 func (w *humanizeFallbackWrapper) Rewrite(ctx context.Context, prompt string) (string, error) {
+	w.attempted = true
 	out, err := w.inner.Rewrite(ctx, prompt)
 	if err != nil {
-		humanizeFallbackOnce.Do(func() {
-			fmt.Fprintln(os.Stderr, "humanize unavailable — using raw bullets")
-		})
+		w.failed = true
+		return out, err
+	}
+	if out != "" {
+		w.succeeded = true
 	}
 	return out, err
 }
 
-// buildHumanizer returns a NoOp when humanization is disabled via flag or env,
-// otherwise returns a ClaudeCLI with the 20s default timeout. When ClaudeCLI
-// returns an error the synthesizer falls back to raw bullets; the one-time stderr
-// hint is emitted via humanizeFallbackOnce.
-func buildHumanizer(noFlag bool) humanizer.Humanizer {
+// banner returns the one-line status message to print under standup output,
+// or "" when no message should be shown (no humanizer call happened at all,
+// e.g. because the output was a sentinel).
+func (w *humanizeFallbackWrapper) banner() string {
+	if !w.attempted {
+		return ""
+	}
+	if w.disabled {
+		return "-- raw output (--no-humanize set)"
+	}
+	if w.succeeded {
+		return "-- humanized via claude-code  (disable: --no-humanize)"
+	}
+	if w.failed {
+		return "-- raw output — install the `claude` CLI for humanized bullets"
+	}
+	// attempted but inner returned ("", nil) without error: treat as NoOp-like;
+	// no banner needed because nothing was actually rewritten.
+	return ""
+}
+
+// buildHumanizer returns (humanizer, disabled). disabled is true when the
+// user explicitly turned humanization off via --no-humanize or the
+// DEBRIEF_HUMANIZE env var. Otherwise returns a ClaudeCLI with the 20s
+// default timeout; any runtime error from `claude` causes the synthesizer
+// to fall back to raw bullets, which the post-render banner surfaces.
+func buildHumanizer(noFlag bool) (humanizer.Humanizer, bool) {
 	if noFlag {
-		return humanizer.NoOp{}
+		return humanizer.NoOp{}, true
 	}
 	v := strings.ToLower(strings.TrimSpace(os.Getenv("DEBRIEF_HUMANIZE")))
 	if v == "0" || v == "false" || v == "off" {
-		return humanizer.NoOp{}
+		return humanizer.NoOp{}, true
 	}
-	return humanizer.ClaudeCLI{Timeout: 20 * time.Second}
+	return humanizer.ClaudeCLI{Timeout: 20 * time.Second}, false
 }
 
 func costCmd() *cobra.Command {
@@ -292,7 +319,7 @@ func runInit() error {
 	return nil
 }
 
-func runStandup(dr model.DateRange, header string, projectFilter string, format string, copyOut bool, prose bool, h humanizer.Humanizer) error {
+func runStandup(dr model.DateRange, header string, projectFilter string, format string, copyOut bool, prose bool, h humanizer.Humanizer, humanizeDisabled bool) error {
 	cfg := config.Load()
 	allActivities := collectActivities(cfg, dr, false)
 	days := daterange.SplitByDay(allActivities, dr, aggregator.Aggregate)
@@ -305,19 +332,28 @@ func runStandup(dr model.DateRange, header string, projectFilter string, format 
 		fmt.Printf("Showing: projects matching %q\n\n", projectFilter)
 	}
 
-	// Wrap h so that any error during humanization triggers the one-time stderr hint
-	// and falls back transparently. The synthesizer already handles ("",nil) as NoOp.
-	hw := &humanizeFallbackWrapper{inner: h}
+	// Wrap h so we can track humanizer outcome and emit a single status banner
+	// after render. The synthesizer still treats ("",nil) as "no rewrite happened".
+	hw := &humanizeFallbackWrapper{inner: h, disabled: humanizeDisabled}
 	body := synthesizer.SynthesizeSmartWith(context.Background(), days, header, format == "slack", prose, hw)
 	// Skip saving state for sentinel outputs (NoActivity, QuietDay) — they're
 	// status messages, not real standups.
-	if body != synthesizer.NoActivity && body != synthesizer.QuietDay {
+	isSentinel := body == synthesizer.NoActivity || body == synthesizer.QuietDay
+	if !isSentinel {
 		if werr := journal.WriteLastStandup(config.ConfigDir(), body, time.Now()); werr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not save standup state: %v\n", werr)
 		}
 	}
 
 	fmt.Print(body)
+	// Emit the humanizer status banner on stderr so it doesn't land in --copy
+	// output or get captured by callers piping stdout. Skip for sentinels since
+	// they bypass the synthesizer's humanizer path entirely.
+	if !isSentinel {
+		if b := hw.banner(); b != "" {
+			fmt.Fprintln(os.Stderr, b)
+		}
+	}
 	if copyOut {
 		if tool, ok, err := clipboard.Copy(body); ok {
 			fmt.Fprintln(os.Stderr, "[copied to clipboard]")

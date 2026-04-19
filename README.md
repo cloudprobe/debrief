@@ -76,6 +76,12 @@ Watch
 
 Empty sections are skipped. A day of only chore commits prints `Quiet day — just chores and lints. Nothing shipped worth writing up.` so you can tell the tool worked, the day was just quiet.
 
+Below the output (on stderr, so it's not copied or piped), debrief prints a one-line status so you always know what mode you're in:
+
+- `-- humanized via claude-code (disable: --no-humanize)` — bullets were rewritten via the local `claude` CLI.
+- `-- raw output — install the `claude` CLI for humanized bullets` — `claude` isn't on PATH.
+- `-- raw output (--no-humanize set)` — you opted out explicitly.
+
 **`debrief standup --format slack`** — flat bullets for pasting:
 
 ```
