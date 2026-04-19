@@ -19,6 +19,27 @@ type GitCollector struct {
 	author    string // filter by author email or name; empty = current user
 }
 
+// gitCommand returns an *exec.Cmd for `git` with GIT_* env stripped.
+//
+// This matters because debrief may be invoked from contexts that export
+// GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE — git hooks, other test harnesses,
+// tooling that shells out to debrief from inside a repo operation. Git
+// respects those env vars over `-C <path>`, so without stripping them the
+// subprocess would query the ambient repo instead of the one we asked for.
+func gitCommand(args ...string) *exec.Cmd {
+	cmd := exec.Command("git", args...)
+	env := os.Environ()
+	out := env[:0]
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	cmd.Env = out
+	return cmd
+}
+
 // NewGitCollector creates a GitCollector that scans the given directories.
 func NewGitCollector(scanPaths []string, maxDepth int) *GitCollector {
 	if maxDepth <= 0 {
@@ -100,7 +121,7 @@ func (g *GitCollector) resolveAuthor() string {
 	if g.author != "" {
 		return g.author
 	}
-	out, err := exec.Command("git", "config", "user.email").Output()
+	out, err := gitCommand("config", "user.email").Output()
 	if err != nil {
 		return ""
 	}
@@ -132,7 +153,7 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 		args = append(args, "--author="+author)
 	}
 
-	cmd := exec.Command("git", args...)
+	cmd := gitCommand(args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = nil
@@ -209,7 +230,7 @@ func (g *GitCollector) collectRepo(repoPath string, dr model.DateRange, author s
 
 // commitDiffStats returns insertions and deletions for a single commit.
 func commitDiffStats(repoPath, hash string) (int, int) {
-	cmd := exec.Command("git", "-C", repoPath, "diff-tree", "--numstat", "--no-commit-id", hash)
+	cmd := gitCommand("-C", repoPath, "diff-tree", "--numstat", "--no-commit-id", hash)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = nil
@@ -243,7 +264,7 @@ func commitDiffStats(repoPath, hash string) (int, int) {
 
 // repoSlug returns "org/repo" from the git remote URL, falling back to the directory name.
 func repoSlug(repoPath string) string {
-	out, err := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
+	out, err := gitCommand("-C", repoPath, "remote", "get-url", "origin").Output()
 	if err == nil {
 		if slug := parseRepoSlug(strings.TrimSpace(string(out))); slug != "" {
 			return slug
@@ -275,7 +296,7 @@ func parseRepoSlug(url string) string {
 }
 
 func getCurrentBranch(repoPath string) string {
-	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	out, err := gitCommand("-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return ""
 	}

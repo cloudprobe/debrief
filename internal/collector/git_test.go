@@ -55,6 +55,10 @@ func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 
 	run("init")
 	run("checkout", "-b", "main")
+	// Belt-and-suspenders: also set identity via repo-local config so commits
+	// resolve to test@example.com even if GIT_AUTHOR_* env doesn't propagate.
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test User")
 
 	// Create two commits.
 	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main"), 0o644); err != nil {
@@ -179,6 +183,8 @@ func TestGitCollector_MultiDayCommitsSplitByDay(t *testing.T) {
 
 	run(baseEnv, "init")
 	run(baseEnv, "checkout", "-b", "main")
+	run(baseEnv, "config", "user.email", "test@example.com")
+	run(baseEnv, "config", "user.name", "Test User")
 
 	// Commit on day1.
 	if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package main"), 0o644); err != nil {
