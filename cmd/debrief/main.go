@@ -470,9 +470,13 @@ func runLogList(_ config.Config) error {
 }
 
 func collectActivities(cfg config.Config, dr model.DateRange, costMode bool) []model.Activity {
+	// Hold a typed reference to the git collector so we can surface discovery
+	// diagnostics after Collect runs — tells the user which paths were scanned
+	// and whether we fell back to CWD because configured paths were empty.
+	gitC := collector.NewGitCollector(cfg.GitRepoPaths, cfg.GitDiscoveryDepth)
 	collectors := []collector.Collector{
 		collector.NewClaudeCollector(cfg.ClaudeDir, costMode, cfg.Pricing),
-		collector.NewGitCollector(cfg.GitRepoPaths, cfg.GitDiscoveryDepth),
+		gitC,
 		collector.NewJournalCollector(config.ConfigDir()),
 	}
 	var all []model.Activity
@@ -486,6 +490,12 @@ func collectActivities(cfg config.Config, dr model.DateRange, costMode bool) []m
 			continue
 		}
 		all = append(all, activities...)
+	}
+	if gitC.UsedCWDFallback() {
+		paths := strings.Join(gitC.ScannedPaths(), ", ")
+		fmt.Fprintf(os.Stderr,
+			"note: no repos under configured paths — scanned %s instead\n      configure git_repo_paths in %s to silence this.\n",
+			paths, filepath.Join(config.ConfigDir(), "config.yaml"))
 	}
 	return all
 }

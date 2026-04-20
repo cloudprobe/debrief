@@ -17,7 +17,22 @@ type GitCollector struct {
 	scanPaths []string
 	maxDepth  int
 	author    string // filter by author email or name; empty = current user
+
+	// Populated after Collect (or discoverReposWithFallback). Exposed via
+	// ScannedPaths / UsedCWDFallback so the CLI can tell the user where we
+	// actually looked — closes the "first run, no output, no idea why" gap.
+	scannedPaths []string
+	usedFallback bool
 }
+
+// ScannedPaths returns the directories walked during the last discovery
+// pass. Empty until Collect (or discoverReposWithFallback) has run.
+func (g *GitCollector) ScannedPaths() []string { return g.scannedPaths }
+
+// UsedCWDFallback reports whether the last discovery pass fell back to
+// scanning the current working directory because configured paths yielded
+// no repos.
+func (g *GitCollector) UsedCWDFallback() bool { return g.usedFallback }
 
 // gitCommand returns an *exec.Cmd for `git` with GIT_* env stripped.
 //
@@ -56,7 +71,7 @@ func (g *GitCollector) Available() bool {
 }
 
 func (g *GitCollector) Collect(dr model.DateRange) ([]model.Activity, error) {
-	repos := g.discoverRepos()
+	repos := g.discoverReposWithFallback()
 	author := g.resolveAuthor()
 
 	var all []model.Activity
@@ -82,6 +97,63 @@ func (g *GitCollector) discoverRepos() []string {
 		}
 		g.scanDir(scanPath, 0, seen, &repos)
 	}
+	return repos
+}
+
+// discoverReposWithFallback runs the configured-paths discovery first; when
+// it returns zero repos, it falls back to scanning the current working
+// directory (including checking whether CWD is itself a repo, which the
+// usual scanDir can't detect since it only looks at subdirectories).
+//
+// Rationale: a user who doesn't store their code under the default
+// ~/work / ~/projects / ~/code layout — or who runs debrief from inside an
+// arbitrary repo — should not get silent empty output. The fallback path
+// also records what we scanned so the CLI can surface it.
+func (g *GitCollector) discoverReposWithFallback() []string {
+	seen := make(map[string]bool)
+	var repos []string
+	var scanned []string
+
+	for _, scanPath := range g.scanPaths {
+		if _, err := os.Stat(scanPath); os.IsNotExist(err) {
+			continue
+		}
+		scanned = append(scanned, scanPath)
+		g.scanDir(scanPath, 0, seen, &repos)
+	}
+	if len(repos) > 0 {
+		g.scannedPaths = scanned
+		g.usedFallback = false
+		return repos
+	}
+
+	// Fallback: current working directory. If CWD itself is a repo we must
+	// add it explicitly since scanDir only recognises repos as subdirectories
+	// of the path it walks.
+	cwd, err := os.Getwd()
+	if err != nil {
+		g.scannedPaths = scanned
+		g.usedFallback = false
+		return repos
+	}
+	scanned = append(scanned, cwd)
+	if fi, err := os.Stat(filepath.Join(cwd, ".git")); err == nil {
+		// Accept either a .git directory (normal clone) or a .git file
+		// (submodule / worktree pointer). Both indicate "this is a repo".
+		_ = fi
+		real, rerr := filepath.EvalSymlinks(cwd)
+		if rerr != nil {
+			real = cwd
+		}
+		if !seen[real] {
+			seen[real] = true
+			repos = append(repos, cwd)
+		}
+	}
+	g.scanDir(cwd, 0, seen, &repos)
+
+	g.scannedPaths = scanned
+	g.usedFallback = true
 	return repos
 }
 

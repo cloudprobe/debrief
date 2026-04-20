@@ -145,6 +145,9 @@ git_repo_paths:
   - ~/projects
   - ~/code
 git_discovery_depth: 2        # how deep to scan for git repos
+# If every configured path is missing or empty, debrief falls back to
+# scanning the current directory (including CWD itself if it's a repo)
+# and prints a one-line note telling you what it scanned.
 
 pricing:
   preset: direct              # direct | max | vertex | bedrock
