@@ -4,11 +4,32 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/cloudprobe/debrief/internal/model"
 )
+
+// testRepoName is reused across discovery tests to satisfy goconst; the
+// specific value doesn't matter, only that it's deterministic.
+const testRepoName = "myrepo"
+
+// sanitizedEnv returns os.Environ() with all GIT_* variables stripped. This
+// isolates subprocess git invocations from leaked ambient state (e.g. when
+// the test runs under a pre-push hook or inside a worktree, GIT_DIR/
+// GIT_WORK_TREE/GIT_INDEX_FILE are inherited and break `git init` in temp dirs).
+func sanitizedEnv() []string {
+	env := os.Environ()
+	out := env[:0]
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "GIT_") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
 
 func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -25,7 +46,7 @@ func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = append(os.Environ(),
+		cmd.Env = append(sanitizedEnv(),
 			"GIT_AUTHOR_NAME=Test User",
 			"GIT_AUTHOR_EMAIL=test@example.com",
 			"GIT_COMMITTER_NAME=Test User",
@@ -38,6 +59,10 @@ func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 
 	run("init")
 	run("checkout", "-b", "main")
+	// Belt-and-suspenders: also set identity via repo-local config so commits
+	// resolve to test@example.com even if GIT_AUTHOR_* env doesn't propagate.
+	run("config", "user.email", "test@example.com")
+	run("config", "user.name", "Test User")
 
 	// Create two commits.
 	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main"), 0o644); err != nil {
@@ -95,7 +120,7 @@ func TestGitCollector_DiscoverReposDepth2(t *testing.T) {
 	tmpdir := t.TempDir()
 
 	// Create a repo nested 2 levels deep: tmpdir/level1/level2/myrepo/.git/
-	repoPath := filepath.Join(tmpdir, "level1", "level2", "myrepo")
+	repoPath := filepath.Join(tmpdir, "level1", "level2", testRepoName)
 	if err := os.MkdirAll(filepath.Join(repoPath, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -106,8 +131,8 @@ func TestGitCollector_DiscoverReposDepth2(t *testing.T) {
 	if len(repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d: %v", len(repos), repos)
 	}
-	if filepath.Base(repos[0]) != "myrepo" {
-		t.Errorf("expected repo named myrepo, got %s", repos[0])
+	if filepath.Base(repos[0]) != testRepoName {
+		t.Errorf("expected repo named %q, got %s", testRepoName, repos[0])
 	}
 }
 
@@ -153,7 +178,7 @@ func TestGitCollector_MultiDayCommitsSplitByDay(t *testing.T) {
 		}
 	}
 
-	baseEnv := append(os.Environ(),
+	baseEnv := append(sanitizedEnv(),
 		"GIT_AUTHOR_NAME=Test User",
 		"GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=Test User",
@@ -162,6 +187,8 @@ func TestGitCollector_MultiDayCommitsSplitByDay(t *testing.T) {
 
 	run(baseEnv, "init")
 	run(baseEnv, "checkout", "-b", "main")
+	run(baseEnv, "config", "user.email", "test@example.com")
+	run(baseEnv, "config", "user.name", "Test User")
 
 	// Commit on day1.
 	if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package main"), 0o644); err != nil {
@@ -224,11 +251,123 @@ func TestGitCollector_MultiDayCommitsSplitByDay(t *testing.T) {
 	}
 }
 
+// TestGitCollector_DiscoverReposWithFallback_UsesCWDWhenConfiguredEmpty covers
+// the first-run-dead-end case: user has no repos under the default scan paths
+// (or points them at empty directories), so discovery falls back to CWD.
+func TestGitCollector_DiscoverReposWithFallback_UsesCWDWhenConfiguredEmpty(t *testing.T) {
+	// Build a workspace whose CWD contains one subdir repo.
+	workspace := t.TempDir()
+	repoSub := filepath.Join(workspace, testRepoName)
+	if err := os.MkdirAll(filepath.Join(repoSub, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Configured scan paths point at a completely empty temp dir — zero repos.
+	emptyScan := t.TempDir()
+
+	// chdir to the workspace so os.Getwd inside the collector returns it.
+	restoreCwd := chdir(t, workspace)
+	defer restoreCwd()
+
+	g := &GitCollector{scanPaths: []string{emptyScan}, maxDepth: 2}
+	repos := g.discoverReposWithFallback()
+
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo via CWD fallback, got %d: %v", len(repos), repos)
+	}
+	if filepath.Base(repos[0]) != testRepoName {
+		t.Errorf("expected repo named %q, got %s", testRepoName, repos[0])
+	}
+	if !g.UsedCWDFallback() {
+		t.Error("expected UsedCWDFallback = true after empty-configured fallback")
+	}
+	if len(g.ScannedPaths()) == 0 {
+		t.Error("expected ScannedPaths to be populated")
+	}
+}
+
+// TestGitCollector_DiscoverReposWithFallback_CWDItselfIsRepo covers the case
+// where the user runs debrief from inside a git repo — scanDir can't find the
+// repo on its own (it only looks at subdirectories), so the fallback must
+// explicitly include CWD when it has a .git.
+func TestGitCollector_DiscoverReposWithFallback_CWDItselfIsRepo(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	emptyScan := t.TempDir()
+	restoreCwd := chdir(t, repo)
+	defer restoreCwd()
+
+	g := &GitCollector{scanPaths: []string{emptyScan}, maxDepth: 2}
+	repos := g.discoverReposWithFallback()
+
+	if len(repos) != 1 {
+		t.Fatalf("expected CWD itself as the single repo, got %d: %v", len(repos), repos)
+	}
+	if !g.UsedCWDFallback() {
+		t.Error("expected UsedCWDFallback = true")
+	}
+}
+
+// TestGitCollector_DiscoverReposWithFallback_NoFallbackWhenConfiguredFinds
+// verifies we do NOT trigger the fallback (and do NOT mark usedFallback) when
+// the primary configured path yielded at least one repo.
+func TestGitCollector_DiscoverReposWithFallback_NoFallbackWhenConfiguredFinds(t *testing.T) {
+	scanDir := t.TempDir()
+	repoSub := filepath.Join(scanDir, "realrepo")
+	if err := os.MkdirAll(filepath.Join(repoSub, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// CWD is a wholly unrelated temp dir — fallback should NOT scan it.
+	unrelated := t.TempDir()
+	restoreCwd := chdir(t, unrelated)
+	defer restoreCwd()
+
+	g := &GitCollector{scanPaths: []string{scanDir}, maxDepth: 2}
+	repos := g.discoverReposWithFallback()
+
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo from configured path, got %d: %v", len(repos), repos)
+	}
+	if g.UsedCWDFallback() {
+		t.Error("expected UsedCWDFallback = false when configured path produced repos")
+	}
+	if len(g.ScannedPaths()) != 1 || g.ScannedPaths()[0] != scanDir {
+		t.Errorf("ScannedPaths should contain only the configured path, got %v", g.ScannedPaths())
+	}
+}
+
+// chdir changes to dir for the duration of the test and returns a cleanup fn.
+// Fails the test if chdir can't happen; resolves symlinks so macOS /var vs
+// /private/var comparisons don't trip callers.
+func chdir(t *testing.T, dir string) func() {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		resolved = dir
+	}
+	if err := os.Chdir(resolved); err != nil {
+		t.Fatalf("Chdir(%q): %v", resolved, err)
+	}
+	return func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Errorf("restoring cwd: %v", err)
+		}
+	}
+}
+
 func TestGitCollector_DiscoverRepos(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a fake repo (dir with .git subdir).
-	repo := filepath.Join(dir, "myrepo")
+	repo := filepath.Join(dir, testRepoName)
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +383,7 @@ func TestGitCollector_DiscoverRepos(t *testing.T) {
 	if len(repos) != 1 {
 		t.Fatalf("expected 1 repo, got %d: %v", len(repos), repos)
 	}
-	if filepath.Base(repos[0]) != "myrepo" {
-		t.Errorf("expected myrepo, got %s", repos[0])
+	if filepath.Base(repos[0]) != testRepoName {
+		t.Errorf("expected %q, got %s", testRepoName, repos[0])
 	}
 }

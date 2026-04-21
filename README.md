@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">debrief</h1>
-  <p align="center">Know what you actually shipped today.</p>
+  <p align="center">What I decided, shipped, and investigated today — synthesized from git + Claude Code sessions, locally.</p>
 </p>
 
 <p align="center">
@@ -20,11 +20,13 @@
 
 ## 💡 Why debrief?
 
-- Writing standup notes from memory wastes time and misses half of what you actually did.
-- Claude Code session logs contain valuable context — decisions made, discoveries, blockers — buried in `.jsonl` files you never read again.
-- Cost visibility across multiple Claude access types (direct API, Max/Pro, Vertex, Bedrock) requires manual calculation.
+Most tools list your commits. debrief tells you what you **decided, shipped, investigated, and what to watch** — classified from git history and the context buried in your Claude Code session logs.
 
-debrief solves all three in seconds.
+- Your decisions and discoveries live in `.jsonl` session files you never reread. debrief mines them.
+- `git log` is a timeline, not a standup. debrief groups work by intent, not by timestamp.
+- Everything runs locally: no API calls, no logins, no cloud.
+
+Also tracks Claude API cost across direct API, Max/Pro, Vertex, and Bedrock.
 
 ---
 
@@ -52,25 +54,43 @@ Choose your Claude Code access type. Config is written to `~/.config/debrief/con
 
 ## 📋 Output samples
 
-**`debrief standup`** — flat bullets, sorted by signal type:
+**`debrief standup`** — grouped by intent, not timestamp:
 
 ```
-Wed, Apr 8 2026
+Fri, Apr 18 2026
 
-  - Decided to use gRPC instead of REST for the internal service calls
-  - Added smart local classifier — Decided/Shipped/Investigated/Risk buckets
-  - Fixed UTF-8 rune-boundary truncation using utf8.RuneStart
-  - Found that squash commits bypass conventional prefix filter — fixed commitBucket
+Decided
+  - Dropped the Slack webhook path — too much scope for v1
+  - Went with go-yaml over mapstructure for config parsing
+
+Shipped
+  - Redesigned the cost table with per-model breakdown (#12)
+  - Added --project filter to standup and cost commands
+
+Investigated
+  - goreleaser's default matrix skips arm64 Linux — had to add it explicitly
+
+Watch
+  - The classifier regex is too aggressive on test: prefixes and drops real work
 ```
 
-**`debrief standup --format slack`** — ready to paste into Slack:
+Empty sections are skipped. A day of only chore commits prints `Quiet day — just chores and lints. Nothing shipped worth writing up.` so you can tell the tool worked, the day was just quiet.
+
+Below the output (on stderr, so it's not copied or piped), debrief prints a one-line status so you always know what mode you're in:
+
+- `-- humanized via claude-code (disable: --no-humanize)` — bullets were rewritten via the local `claude` CLI.
+- `-- raw output — install the `claude` CLI for humanized bullets` — `claude` isn't on PATH.
+- `-- raw output (--no-humanize set)` — you opted out explicitly.
+
+**`debrief standup --format slack`** — flat bullets for pasting:
 
 ```
-`Wed, Apr 8 2026`
+`Fri, Apr 18 2026`
 
-- Decided to use gRPC instead of REST for the internal service calls
-- Added smart local classifier — Decided/Shipped/Investigated/Risk buckets
-- Fixed UTF-8 rune-boundary truncation using utf8.RuneStart
+- Dropped the Slack webhook path — too much scope for v1
+- Went with go-yaml over mapstructure for config parsing
+- Redesigned the cost table with per-model breakdown (#12)
+- goreleaser's default matrix skips arm64 Linux — had to add it explicitly
 ```
 
 **`debrief cost week`** — per-model cost breakdown:
@@ -125,6 +145,9 @@ git_repo_paths:
   - ~/projects
   - ~/code
 git_discovery_depth: 2        # how deep to scan for git repos
+# If every configured path is missing or empty, debrief falls back to
+# scanning the current directory (including CWD itself if it's a repo)
+# and prints a one-line note telling you what it scanned.
 
 pricing:
   preset: direct              # direct | max | vertex | bedrock
@@ -151,7 +174,7 @@ flowchart LR
     C --> E[Decided]
     C --> F[Shipped]
     C --> G[Investigated]
-    C --> H[Risk]
+    C --> H[Watch]
     E & F & G & H --> I[output]
 ```
 
@@ -159,21 +182,25 @@ The local classifier runs entirely in-process — no model calls, no network.
 
 **Commit signal rules:**
 
-| Prefix | Bucket |
-|--------|--------|
-| `feat`, `fix`, `perf`, `refactor` | Shipped |
-| `chore`, `test`, `ci`, `docs` | Skipped |
-| anything else | Shipped (fallback) |
+| Commit shape | Bucket |
+|--------------|--------|
+| `feat`, `fix`, `perf`, `refactor`, `build`, `ci` | Shipped |
+| `docs` with substantive body | Shipped |
+| `chore`, `test` with a `(#N)` PR-squash suffix + substantive body | Shipped (merged via review) |
+| other `chore`, `test`, short `docs` | Skipped as noise |
+| any non-conventional prefix | Shipped (fallback) |
+| `Merge pull request` / `Merge branch` | Shipped |
 
 **Session note signal rules:**
 
 | Keyword pattern | Bucket |
 |-----------------|--------|
-| "decided", "went with", "chose" | Decided |
-| "found", "discovered", "turns out" | Investigated |
-| "risk", "concern", "blocked" | Risk |
+| "decided", "went with", "chose", "switched to", "picked" | Decided |
+| "found", "discovered", "ruled out", "investigated", "turns out" | Investigated |
+| "risk", "concern", "watch out" | Watch |
+| everything else that survives quality filters | Shipped |
 
-Output order is always: Decided → Shipped → Investigated → Risk.
+Output order is always: Decided → Shipped → Investigated → Watch. Empty sections are omitted.
 
 ---
 
@@ -208,7 +235,7 @@ Direct API, Max/Pro subscription, Vertex AI, and Amazon Bedrock. Set your type w
 
 **Why are some commits not showing up in standup?**
 
-Commits with `chore`, `test`, `ci`, or `docs` prefixes are filtered out by default — they add noise to standup output. Use `debrief log` to surface anything filtered that actually matters.
+`chore` and `test` commits are filtered as noise by default. Short `docs` commits are too. But if a `chore(lint): ... (#42)` went through a PR and has a meaningful message, it's treated as shipped — the PR-squash suffix + substantive body combo is evidence the work was reviewed and merged. If a day ends up with only filtered commits, you'll see `Quiet day — just chores and lints` rather than the tool looking broken. Use `debrief log` to surface anything the filter drops.
 
 **The cost table shows $0.00 for some models — is that correct?**
 

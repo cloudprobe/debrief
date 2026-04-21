@@ -164,6 +164,62 @@ func TestSynthesizeSmart(t *testing.T) {
 		}
 	})
 
+	t.Run("chore PR-squash with substantive body APPEARS (merged via review)", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"chore(lint): migrate from eslint to biome with full config rewrite (#42)"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if !strings.Contains(got, "Migrate from eslint to biome") {
+			t.Errorf("substantive PR-squashed chore should appear, got:\n%s", got)
+		}
+	})
+
+	t.Run("test PR-squash with substantive body APPEARS", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"test: add integration tests for payments flow (#42)"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if !strings.Contains(got, "Add integration tests for payments") {
+			t.Errorf("substantive PR-squashed test commit should appear, got:\n%s", got)
+		}
+	})
+
+	t.Run("short chore PR-squash still filtered (no substantive body)", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"chore: bump deps (#42)"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if strings.Contains(got, "bump deps") || strings.Contains(got, "Bump deps") {
+			t.Errorf("short chore PR-squash should still be filtered, got:\n%s", got)
+		}
+	})
+
+	t.Run("chore without PR suffix still filtered even if body is long", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"chore: clean up unused helper functions across the repo"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if strings.Contains(got, "Clean up unused") || strings.Contains(got, "clean up unused") {
+			t.Errorf("chore without PR suffix should still be filtered, got:\n%s", got)
+		}
+	})
+
 	t.Run("note with decided keyword appears first", func(t *testing.T) {
 		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
 			"myproject": {
@@ -237,6 +293,42 @@ func TestSynthesizeSmart(t *testing.T) {
 		}
 	})
 
+	t.Run("only chore/test commits returns QuietDay message, not noActivity", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name: "myproject",
+				CommitMessages: []string{
+					"chore: bump deps",
+					"chore: format code",
+					"test: add missing assertion",
+				},
+				CommitCount: 3,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if got == noActivity {
+			t.Errorf("expected QuietDay message, got noActivity")
+		}
+		if !strings.Contains(got, "Quiet day") {
+			t.Errorf("expected 'Quiet day' in output, got:\n%s", got)
+		}
+	})
+
+	t.Run("only chore commit across multi-day returns QuietDay message", func(t *testing.T) {
+		days := []model.DaySummary{
+			makeDay(time.Date(2026, 4, 6, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+				"proj-a": {Name: "proj-a", CommitMessages: []string{"chore: bump deps"}, CommitCount: 1},
+			}),
+		}
+		got := SynthesizeSmart(days, "Week of Apr 6", false)
+		if got == noActivity {
+			t.Errorf("expected QuietDay message, got noActivity")
+		}
+		if !strings.Contains(got, "Quiet") {
+			t.Errorf("expected quiet-day messaging, got:\n%s", got)
+		}
+	})
+
 	t.Run("session note covered by commit — commit not duplicated", func(t *testing.T) {
 		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
 			"myproject": {
@@ -250,6 +342,94 @@ func TestSynthesizeSmart(t *testing.T) {
 		count := strings.Count(got, "authentication")
 		if count > 1 {
 			t.Errorf("authentication should appear only once (note wins over commit), got:\n%s", got)
+		}
+	})
+
+	t.Run("text mode emits section headers for non-empty buckets", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name: "myproject",
+				SessionNotes: []string{
+					"Decided to drop Slack webhook support — too much scope for v1",
+					"Found that goreleaser skips arm64 Linux by default — had to add explicitly",
+				},
+				CommitMessages: []string{"feat: add login page"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		for _, label := range []string{"Decided", "Shipped", "Investigated"} {
+			if !strings.Contains(got, label+"\n") {
+				t.Errorf("expected %q section header, got:\n%s", label, got)
+			}
+		}
+		// Section order must be Decided → Shipped → Investigated.
+		decidedIdx := strings.Index(got, "Decided\n")
+		shippedIdx := strings.Index(got, "Shipped\n")
+		investigatedIdx := strings.Index(got, "Investigated\n")
+		if decidedIdx >= shippedIdx || shippedIdx >= investigatedIdx {
+			t.Errorf("section order wrong: Decided=%d Shipped=%d Investigated=%d\noutput:\n%s",
+				decidedIdx, shippedIdx, investigatedIdx, got)
+		}
+	})
+
+	t.Run("text mode skips empty-bucket headers", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name:           "myproject",
+				CommitMessages: []string{"feat: add login page"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if strings.Contains(got, "Decided\n") {
+			t.Errorf("empty Decided bucket should not emit header, got:\n%s", got)
+		}
+		if strings.Contains(got, "Investigated\n") {
+			t.Errorf("empty Investigated bucket should not emit header, got:\n%s", got)
+		}
+		if strings.Contains(got, "Watch\n") {
+			t.Errorf("empty Watch bucket should not emit header, got:\n%s", got)
+		}
+		if !strings.Contains(got, "Shipped\n") {
+			t.Errorf("expected Shipped section header, got:\n%s", got)
+		}
+	})
+
+	t.Run("text mode uses Watch label for risk bucket", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name: "myproject",
+				SessionNotes: []string{
+					"Risk: the classifier regex is too aggressive on test: prefixes and drops work",
+				},
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", false)
+		if !strings.Contains(got, "Watch\n") {
+			t.Errorf("expected 'Watch' section header for risk bucket, got:\n%s", got)
+		}
+		if strings.Contains(got, "Risk\n") {
+			t.Errorf("should not emit 'Risk' header (Watch is the display label), got:\n%s", got)
+		}
+	})
+
+	t.Run("slack mode stays flat — no section headers", func(t *testing.T) {
+		day := makeDay(time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC), map[string]model.ProjectSummary{
+			"myproject": {
+				Name: "myproject",
+				SessionNotes: []string{
+					"Decided to drop Slack webhook support — too much scope for v1",
+				},
+				CommitMessages: []string{"feat: add login page"},
+				CommitCount:    1,
+			},
+		})
+		got := SynthesizeSmart([]model.DaySummary{day}, "", true)
+		for _, label := range []string{"Decided\n", "Shipped\n", "Investigated\n", "Watch\n"} {
+			if strings.Contains(got, label) {
+				t.Errorf("slack mode should not emit section header %q, got:\n%s", label, got)
+			}
 		}
 	})
 
