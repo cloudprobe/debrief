@@ -31,10 +31,44 @@ func sanitizedEnv() []string {
 	return out
 }
 
+// unsetGitHookVars unsets process-level GIT_* variables that git sets when
+// running inside a hook (e.g. pre-commit). sanitizedEnv only scrubs env for
+// subprocesses we launch directly — the production collector code under test
+// spawns its own git processes that inherit os.Environ(), so those still see
+// the leaked GIT_DIR/GIT_WORK_TREE and target the outer worktree instead of
+// the temp repo. Unset at the process level and restore via t.Cleanup.
+func unsetGitHookVars(t *testing.T) {
+	t.Helper()
+	hookVars := []string{
+		"GIT_DIR",
+		"GIT_WORK_TREE",
+		"GIT_INDEX_FILE",
+		"GIT_COMMON_DIR",
+		"GIT_PREFIX",
+		"GIT_EXEC_PATH",
+		"GIT_REFLOG_ACTION",
+	}
+	for _, k := range hookVars {
+		old, present := os.LookupEnv(k)
+		if !present {
+			continue
+		}
+		if err := os.Unsetenv(k); err != nil {
+			t.Fatalf("unset %s: %v", k, err)
+		}
+		t.Cleanup(func() {
+			_ = os.Setenv(k, old)
+		})
+	}
+}
+
 func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+	// See unsetGitHookVars — required when the test runs inside a pre-commit
+	// hook so Collect() targets the temp repo, not the outer worktree.
+	unsetGitHookVars(t)
 
 	// Create a temp repo with commits.
 	dir := t.TempDir()
@@ -58,7 +92,13 @@ func TestGitCollector_CollectFromTempRepo(t *testing.T) {
 	}
 
 	run("init")
-	run("checkout", "-b", "main")
+	// Disable any global hooksPath — the temp repo inherits ~/.gitconfig
+	// settings; a developer-machine commit-msg hook (e.g. min-length) would
+	// otherwise fire inside the test.
+	run("config", "core.hooksPath", "/dev/null")
+	// -B (create-or-reset) tolerates init.defaultBranch=main, which makes
+	// git init pre-create "main" and then reject -b main.
+	run("checkout", "-B", "main")
 	// Belt-and-suspenders: also set identity via repo-local config so commits
 	// resolve to test@example.com even if GIT_AUTHOR_* env doesn't propagate.
 	run("config", "user.email", "test@example.com")
@@ -159,6 +199,8 @@ func TestGitCollector_MultiDayCommitsSplitByDay(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
+	// See TestGitCollector_CollectFromTempRepo for why this is needed.
+	unsetGitHookVars(t)
 
 	dir := t.TempDir()
 	repo := filepath.Join(dir, "multi-day-project")
@@ -186,7 +228,9 @@ func TestGitCollector_MultiDayCommitsSplitByDay(t *testing.T) {
 	)
 
 	run(baseEnv, "init")
-	run(baseEnv, "checkout", "-b", "main")
+	// See TestGitCollector_CollectFromTempRepo for the rationale on these.
+	run(baseEnv, "config", "core.hooksPath", "/dev/null")
+	run(baseEnv, "checkout", "-B", "main")
 	run(baseEnv, "config", "user.email", "test@example.com")
 	run(baseEnv, "config", "user.name", "Test User")
 
