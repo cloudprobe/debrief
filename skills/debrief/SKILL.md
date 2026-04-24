@@ -1,7 +1,7 @@
 ---
 name: debrief
 description: Generate a daily standup — what you decided, shipped, and investigated — from local git history and Claude Code session logs. 100% local, no network calls. Use when the user asks for a standup, daily summary, end-of-day writeup, "what did I do today", or similar.
-allowed-tools: Bash(git *), Bash(ls *), Bash(date *), Bash(pbcopy), Read, Grep, Glob
+allowed-tools: Bash(git:*), Bash(ls:*), Bash(date:*), Bash(env:*), Bash(pbcopy:*), Bash(xclip:*), Read, Grep, Glob
 ---
 
 # debrief
@@ -57,7 +57,7 @@ Convert the user's input into a concrete `[start, end]` pair in the local timezo
 - `last N days` → now - N days → now
 - explicit `YYYY-MM-DD` → that day 00:00 → that day 23:59:59
 
-### 2. Discover git repos
+**Timezone handling.** The window above is local-time. Git's `--since` / `--until` already honor the local zone, so §3 needs no conversion. §4 (Claude session notes) compares against JSONL `timestamp` values that are ISO-8601 UTC (`…Z`) — convert *both* sides to Unix epoch seconds before comparing. Do not string-compare ISO forms, and do not assume the JSONL record is in local time.
 
 Scan these locations, depth 2:
 - `~/work`
@@ -94,7 +94,7 @@ Each JSONL file is one Claude Code session. Lines are records like:
 {"type":"assistant","sessionId":"...","timestamp":"...","cwd":"/path","gitBranch":"main","message":{"id":"msg_...","content":[{"type":"text","text":"..."},{"type":"tool_use",...}]}}
 ```
 
-For each assistant message within `[start, end]`:
+For each assistant message within `[start, end]` (per the epoch-seconds comparison rule in §1):
 - Dedup globally by `message.id` across all files (same message can appear in parent + subagent files).
 - For each `content` block of type `"text"`, extract the text and pass it through the **note filter** (§5).
 
@@ -239,7 +239,17 @@ Watch
 
 Buckets still dictate the *order* of bullets in the flat list. No section headers.
 
-**Copy request:** after rendering, run `printf '%s' "<output>" | pbcopy` (macOS) or `xclip -selection clipboard` (Linux). Confirm with a one-line status on stderr-style second message: `"Copied to clipboard."`
+**Copy request:** after rendering, do not pass the output through the shell as an argument — commit subjects and notes commonly contain `"`, `` ` ``, `$`, and `\`, which would be reinterpreted. Write the rendered payload to a tempfile and pipe from there:
+
+```bash
+tmp=$(mktemp)
+# write the rendered standup to "$tmp" via the Write tool (no shell interpolation)
+pbcopy < "$tmp"       # macOS
+xclip -selection clipboard < "$tmp"   # Linux
+rm -f "$tmp"
+```
+
+Confirm with a one-line status on a stderr-style second message: `"Copied to clipboard."`
 
 ### 9. Display
 
